@@ -1,0 +1,11 @@
+/bin/
+/target/
+.project
+.classpath
+.settings
+*.hgrm
+*.jar
+*.log
+logs
+test*
+histograms
