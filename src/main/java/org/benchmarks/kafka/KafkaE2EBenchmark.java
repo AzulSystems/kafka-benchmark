@@ -53,12 +53,12 @@ public class KafkaE2EBenchmark implements Benchmark {
     private long totalConsumerBytes;
     private long totalProducerBytes;
     private long totalProducerErrors;
+    private long consumerTime;
+    private long producerTime;
     private double totalConsumerThroughput;
     private double totalProducerThroughput;
     private double totalConsumerBytesThroughput;
     private double totalProducerBytesThroughput;
-    private long consumerTime;
-    private long producerTime;
     private boolean resetRequired = true;
     private Object consumerLock = new Object();
     private Object producerLock = new Object();
@@ -97,7 +97,7 @@ public class KafkaE2EBenchmark implements Benchmark {
 
     @Override
     public void cleanup() {
-        deleteTopic();
+        deleteTopic(false);
     }
 
     @Override
@@ -108,7 +108,7 @@ public class KafkaE2EBenchmark implements Benchmark {
     @Override
     public void reset() {
         if (resetRequired) {
-            deleteTopic();
+            deleteTopic(true);
             createTopic();
             resetRequired = false;
         }
@@ -144,12 +144,12 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
     }
 
-    public void deleteTopic() {
+    public void deleteTopic(boolean wait) {
         log("Deleting topic '" + config.topic + "'...");
         try {
             DeleteTopicsResult result = adminClient.deleteTopics(Arrays.asList(config.topic));
             result.all().get();
-            if (config.waitAfterDeleteTopic > 0) {
+            if (wait && config.waitAfterDeleteTopic > 0) {
                 sleep(config.waitAfterDeleteTopic, "waiting after topic deletion");
             }
             log("Topic deleted '" + config.topic + "'");
@@ -387,7 +387,7 @@ public class KafkaE2EBenchmark implements Benchmark {
                 timeChunkCurrentNs = System.nanoTime() - timeChunkStartNs;
                 if (timeChunkSizeNs - timeChunkCurrentNs > 0) {
                     timeChunkStartNs = timeChunkStartNs + timeChunkSizeNs;
-                    SleepTool.sleepUntil(timeChunkSizeNs - timeChunkCurrentNs);
+                    SleepTool.sleep(timeChunkSizeNs - timeChunkCurrentNs);
                 } else {
                     timeChunkStartNs = System.nanoTime();
                 }
@@ -473,7 +473,7 @@ public class KafkaE2EBenchmark implements Benchmark {
                 }
                 while (recordIter.hasNext()) {
                     ConsumerRecord<byte[], byte[]> consumerRecord = recordIter.next();
-                    long recordRecvTime = System.nanoTime();
+                    long recordRecvTime = System.nanoTime() + timeOffs;
                     String read = new String(consumerRecord.value(), StandardCharsets.UTF_8);
                     boolean isWarmup = Boolean.parseBoolean(read.substring(0, read.indexOf('-')));
                     long recordSendTime = Long.parseLong(read.substring(read.indexOf('-') + 1).trim());
@@ -481,7 +481,7 @@ public class KafkaE2EBenchmark implements Benchmark {
                         messageCountWarmup++;
                     } else {
                         if (timeRecorder != null) {
-                            timeRecorder.recordTimes("msg", recordSendTime + timeOffs, 0, recordRecvTime, true);
+                            timeRecorder.recordTimes("msg", recordSendTime, 0, recordRecvTime, true);
                         }
                         messageCount++;
                         messageSize += consumerRecord.value().length;

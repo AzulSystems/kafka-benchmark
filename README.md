@@ -10,14 +10,14 @@ The benchmark measures and reports:
 Build:
 
 ```
-# requires: java, maven 
+# requires: java, maven
 $ ./build.sh
 ```
 
 Run:
 
 ```
-# requires: java 
+# requires: java
 $ java -jar kafka-benchmark-*.jar [-f yaml-file | -s yaml-string | -p prop1=value1 -p prop2=value2 ...]
 ```
 
