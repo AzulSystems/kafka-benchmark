@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Azul Systems
+ * Copyright (c) 2021-2022, Azul Systems
  * 
  * All rights reserved.
  * 
@@ -30,16 +30,14 @@
  * 
  */
 
-package org.benchmarks.kafka;
+package org.tussleframework.kafka;
 
-public class KafkaRuntimeException extends RuntimeException {
-    private static final long serialVersionUID = 1L;
+import org.tussleframework.BasicRunner;
+import org.tussleframework.tools.LoggerTool;
 
-    public KafkaRuntimeException(Exception e) {
-        super(e);
-    }
-
-    public KafkaRuntimeException(String s, Exception e) {
-        super(s, e);
+public class KafkaE2EBenchmarkRunner {
+    public static void main(String[] args) {
+        LoggerTool.init("benchmark");
+        new BasicRunner().run(KafkaE2EBenchmark.class, args);
     }
 }

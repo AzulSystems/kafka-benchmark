@@ -30,14 +30,16 @@
  * 
  */
 
-package org.benchmarks.kafka;
+package org.tussleframework.kafka;
 
-import org.benchmarks.BasicRunner;
-import org.benchmarks.tools.LoggerTool;
+public class KafkaRuntimeException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
 
-public class KafkaE2EBenchmarkRunner {
-    public static void main(String[] args) {
-        LoggerTool.init("benchmark");
-        new BasicRunner().run(KafkaE2EBenchmark.class, args);
+    public KafkaRuntimeException(Exception e) {
+        super(e);
+    }
+
+    public KafkaRuntimeException(String s, Exception e) {
+        super(s, e);
     }
 }

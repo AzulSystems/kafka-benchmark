@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Azul Systems
+ * Copyright (c) 2021-2022, Azul Systems
  * 
  * All rights reserved.
  * 
@@ -30,9 +30,9 @@
  * 
  */
 
-package org.benchmarks.kafka;
+package org.tussleframework.kafka;
 
-import static org.benchmarks.tools.FormatTool.roundFormat;
+import static org.tussleframework.tools.FormatTool.roundFormat;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -64,12 +64,12 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
-import org.benchmarks.Benchmark;
-import org.benchmarks.BenchmarkConfig;
-import org.benchmarks.RunResult;
-import org.benchmarks.TimeRecorder;
-import org.benchmarks.tools.ConfigLoader;
-import org.benchmarks.tools.SleepTool;
+import org.tussleframework.Benchmark;
+import org.tussleframework.BenchmarkConfig;
+import org.tussleframework.RunResult;
+import org.tussleframework.TimeRecorder;
+import org.tussleframework.tools.ConfigLoader;
+import org.tussleframework.tools.SleepTool;
 
 public class KafkaE2EBenchmark implements Benchmark {
 
@@ -238,7 +238,7 @@ public class KafkaE2EBenchmark implements Benchmark {
 
     @Override
     public RunResult run(double targetRate, int warmupTime, int runTime, TimeRecorder timeRecorder) {
-        double perProducerMessageRate = targetRate / config.producerThreads;
+        double perProducerMessageRate = targetRate / config.producers;
         resetRequired = true;
         consumerTime = 0;
         producerTime = 0;
@@ -254,19 +254,19 @@ public class KafkaE2EBenchmark implements Benchmark {
         totalConsumerBytesThroughput = 0;
         totalProducerBytesThroughput = 0;
         AtomicInteger running = new AtomicInteger();
-        running.set(config.consumerThreads + config.producerThreads);
+        running.set(config.consumers + config.producers);
         ArrayList<Thread> consumerThreads = new ArrayList<>();
-        for (int i = 1; i <= config.consumerThreads; i++) {
+        for (int i = 1; i <= config.consumers; i++) {
             ConsumerRunner cr = new ConsumerRunner(running, consumerProps, timeRecorder, warmupTime, config);
             consumerThreads.add(new Thread(cr, "Consumer_" + roundFormat(targetRate) + "_" + i));
         }
         ArrayList<Thread> producerThreads = new ArrayList<>();
-        for (int i = 1; i <= config.producerThreads; i++) {
+        for (int i = 1; i <= config.producers; i++) {
             ProducerRunner pr = new ProducerRunner(running, producerProps, warmupTime, runTime, perProducerMessageRate, config);
             producerThreads.add(new Thread(pr, "Producer_" + (int) targetRate + "_" + i));
         }
-        String ps = withS(config.producerThreads, "producer");
-        String cs = withS(config.consumerThreads, "consumer");
+        String ps = withS(config.producers, "producer");
+        String cs = withS(config.consumers, "consumer");
         log("Starting %s and %s, targetRate %s, warmupTime %ds, runTime %ds", ps, cs, roundFormat(targetRate), warmupTime, runTime);
         consumerThreads.forEach(Thread::start);
         producerThreads.forEach(Thread::start);
@@ -295,13 +295,12 @@ public class KafkaE2EBenchmark implements Benchmark {
         log("Consumer time: %s ms", roundFormat(consumerTime));
         log("Producer msgs count during warmup: %d", totalProducerMsgCountW);
         log("Consumer msgs count during warmup: %d", totalConsumerMsgCountWarmup);
-        RunResult results = new RunResult();
-        results.rateUnits = RATE_MSGS_UNITS;
-        results.rate = totalProducerThroughput;
-        results.time = producerTime;
-        results.count = totalConsumerMsgCount;
-        results.errors = totalProducerErrors;
-        return results;
+        return RunResult.builder()
+                .rateUnits(RATE_MSGS_UNITS)
+                .rate(totalProducerThroughput)
+                .time(producerTime)
+                .count(totalConsumerMsgCount)
+                .errors(totalProducerErrors).build();
     }
 
     @Override
