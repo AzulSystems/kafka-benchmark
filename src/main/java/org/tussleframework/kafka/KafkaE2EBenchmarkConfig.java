@@ -42,7 +42,7 @@ import lombok.EqualsAndHashCode;
 public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public String brokerList = "localhost:9092"; // list of Kafka brokers
     public String topic = "test";           // Kafka topic used for testing
-    public String producerAcks = "1";       // ProducerConfig.ACKS_DOC
+    public String acks = "1";               // ProducerConfig.ACKS_DOC
     public int partitions = 1;              // Kafka topic partitions number used in the topic creation inside benchmark reset() if BenchmarkConfig.reset is true 
     public int replicationFactor = 1;       // Kafka topic replication factor used in the topic creation inside benchmark reset() if BenchmarkConfig.reset is true
     public int createTopicRetries = 5;      // number of topic creation retries

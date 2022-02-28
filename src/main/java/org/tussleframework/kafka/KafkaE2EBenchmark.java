@@ -329,7 +329,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList);
         props.put(ProducerConfig.LINGER_MS_CONFIG, "0"); // ensure writes are synchronous
         props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, Long.MAX_VALUE);
-        props.put(ProducerConfig.ACKS_CONFIG, config.producerAcks);
+        props.put(ProducerConfig.ACKS_CONFIG, config.acks);
         props.put(ProducerConfig.RETRIES_CONFIG, "0");
         if (config.batchSize != -1) {
             props.put(ProducerConfig.BATCH_SIZE_CONFIG, config.batchSize);
