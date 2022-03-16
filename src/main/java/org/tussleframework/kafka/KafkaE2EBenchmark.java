@@ -45,14 +45,17 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.CreateTopicsOptions;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.DeleteTopicsResult;
+import org.apache.kafka.clients.admin.ListTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -73,9 +76,18 @@ import org.tussleframework.tools.SleepTool;
 
 public class KafkaE2EBenchmark implements Benchmark {
 
-    private static final Logger logger = Logger.getLogger(KafkaE2EBenchmark.class.getName());
-    private static final String RATE_MSGS_UNITS = "msgs/s";
-    private static final String RATE_MB_UNITS = "MiB/s";
+    static final Logger logger = Logger.getLogger(KafkaE2EBenchmark.class.getName());
+    static final String RATE_MSGS_UNITS = "msg/s";
+    static final String RATE_MB_UNITS = "MiB/s";
+    static final String TIME_MSGS_UNITS = "ms";
+
+    static final String OP_POLL = "poll";
+    static final String OP_SEND = "send";
+    static final String OP_END_TO_END = "end-to-end";
+    static final String[] operations = {
+            OP_POLL, OP_SEND, OP_END_TO_END
+    };
+
     static final long NS_IN_MS = 1000000L;
 
     private long totalConsumerMsgCountWarmup;
@@ -200,10 +212,22 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
     }
 
+    public boolean checkTopic() throws InterruptedException {
+        ListTopicsResult topics = adminClient.listTopics();
+        try {
+            Set<String> topicsNames = topics.names().get();
+            boolean res = topicsNames.contains(config.topic);
+            log("Topic '" + config.topic + "' exists " + res);
+            return res;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            throw new KafkaRuntimeException("Failed to ctopic '" + config.topic + "'", e);
+        }
+    }
+
     public void createTopic() {
-        int waitTime = 1;
-        int attemptNum = 0;
-        int retries = config.createTopicRetries;
         Map<String, String> configs = new HashMap<>();
         if (config.retentionMs > 0) {
             configs.put(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(config.retentionMs));
@@ -216,28 +240,34 @@ public class KafkaE2EBenchmark implements Benchmark {
             newTopic.configs(configs);
         }
         Collection<NewTopic> newTopics = Arrays.asList(newTopic);
-        while (true) {
-            attemptNum++;
-            try {
-                log("Creating new topic '%s' with %s, replication-factor %d (attempt #%d)", config.topic, withS(config.partitions, "partition"), config.replicationFactor, attemptNum);
-                CreateTopicsResult result = adminClient.createTopics(newTopics);
-                result.all().get();
-                log("Topic created: '%s' (attempt #%d)", config.topic, attemptNum);
-                return;
-            } catch (final Exception e) {
-                if (retries <= 0) {
-                    throw new KafkaRuntimeException("Failed to create topic '" + config.topic + "'", e);
-                }
-                retries--;
-                log("Failed to create topic '" + config.topic + "', cause: " + e);
-                sleep(waitTime, "will retry to create topic");
-                waitTime++;
+        try {
+            log("Creating new topic '%s' with %s, replication-factor %d, topic timeout %d", config.topic, withS(config.partitions, "partition"), config.replicationFactor, config.createTopicTimeout);
+            CreateTopicsOptions createTopicsOptions = new CreateTopicsOptions();
+            if (config.createTopicTimeout > 0) {
+                createTopicsOptions.timeoutMs(config.createTopicTimeout);
             }
+            CreateTopicsResult result = adminClient.createTopics(newTopics, createTopicsOptions);
+            result.all().get();
+            log("Topic created: '%s'", config.topic);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            if (e instanceof org.apache.kafka.common.errors.TopicExistsException ||
+                e.getCause() instanceof org.apache.kafka.common.errors.TopicExistsException) {
+                log("Topic created: '%s' - TopicExistsException", config.topic);
+                return;
+            }
+            throw new KafkaRuntimeException("Failed to create topic '" + config.topic + "'", e);
         }
     }
 
     @Override
     public RunResult run(double targetRate, int warmupTime, int runTime, TimeRecorder timeRecorder) {
+        if (timeRecorder != null) {
+            for (String op: operations) {
+                timeRecorder.startRecording(op, RATE_MSGS_UNITS, TIME_MSGS_UNITS);
+            }
+        }
         double perProducerMessageRate = targetRate / config.producers;
         resetRequired = true;
         consumerTime = 0;
@@ -262,7 +292,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
         ArrayList<Thread> producerThreads = new ArrayList<>();
         for (int i = 1; i <= config.producers; i++) {
-            ProducerRunner pr = new ProducerRunner(running, producerProps, warmupTime, runTime, perProducerMessageRate, config);
+            ProducerRunner pr = new ProducerRunner(running, producerProps, timeRecorder, warmupTime, runTime, perProducerMessageRate, config);
             producerThreads.add(new Thread(pr, "Producer_" + (int) targetRate + "_" + i));
         }
         String ps = withS(config.producers, "producer");
@@ -322,7 +352,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         props.put(ConsumerConfig.SEND_BUFFER_CONFIG, "16777216");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
-        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "0"); // ensure we have no temporal batching
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "0"); // ensure no temporal batching
     }
 
     private void setupProducerProps(Properties props) {
@@ -331,31 +361,36 @@ public class KafkaE2EBenchmark implements Benchmark {
         props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, Long.MAX_VALUE);
         props.put(ProducerConfig.ACKS_CONFIG, config.acks);
         props.put(ProducerConfig.RETRIES_CONFIG, "0");
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
         if (config.batchSize != -1) {
             props.put(ProducerConfig.BATCH_SIZE_CONFIG, config.batchSize);
         }
         if (config.lingerMs != -1) {
             props.put(ProducerConfig.LINGER_MS_CONFIG, config.lingerMs);
         }
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
+        if (config.requestTimeoutMs != -1) {
+            props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, config.requestTimeoutMs);
+        }
     }
 
     class ProducerRunner implements Runnable {
+        private AtomicInteger runningProducers;
+        private TimeRecorder timeRecorder;
         private Properties producerProps;
         private String topic;
         private double messageRate;
-        private AtomicInteger runningProducers;
-        private int runTime;
-        private int warmupTime;
-        private int messageLength;
         private int messageLengthMax;
+        private int messageLength;
+        private int warmupTime;
+        private int runTime;
         private long messageCount = 0;
         private long messageCountW = 0;
         private long messageSize = 0;
         private long errorCount = 0;
-        private long timeOffs = System.currentTimeMillis() * NS_IN_MS - System.nanoTime();;
+        private long timeOffs = System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
         private Random random = new Random(0); // repeatable pseudo random sequence
+        private char[] spaceChars;
 
         private Callback callback = (RecordMetadata metadata, Exception e) -> {
             if (e == null) {
@@ -375,32 +410,48 @@ public class KafkaE2EBenchmark implements Benchmark {
             }
         };
 
-        ProducerRunner(AtomicInteger runningProducers, Properties producerProps, int warmupTime, int runTime, double messageRate, KafkaE2EBenchmarkConfig config) {
+        ProducerRunner(AtomicInteger runningProducers, Properties producerProps, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate, KafkaE2EBenchmarkConfig config) {
             this.runningProducers = runningProducers;
             this.producerProps = producerProps;
+            this.timeRecorder = timeRecorder;
             this.warmupTime = warmupTime;
             this.runTime = runTime;
             this.messageRate = messageRate;
             this.topic = config.topic;
             this.messageLength = config.messageLength;
             this.messageLengthMax = config.messageLengthMax > config.messageLength ? config.messageLengthMax : config.messageLength;
+            this.spaceChars = new char[messageLengthMax];
+            Arrays.fill(this.spaceChars, ' ');
         }
 
-        private ProducerRecord<byte[], byte[]> getNextRecord(byte[] spaceBytes, boolean isWarmup) {
-            Long recordSendTime = System.nanoTime() + timeOffs;
+        private ProducerRecord<byte[], byte[]> getNextRecord(boolean isWarmup, long recordSendTime) {
             int msgLength = messageLength + (messageLengthMax > messageLength ? random.nextInt(messageLengthMax - messageLength) : 0);
-            byte[] message = (Boolean.toString(isWarmup) + '-' + recordSendTime.toString() + new String(spaceBytes, 0, msgLength)).getBytes(StandardCharsets.UTF_8);
+            StringBuilder sb = new StringBuilder();
+            sb.append(isWarmup).append('-').append(recordSendTime);
+            if (msgLength > sb.length()) {
+                sb.append(spaceChars, 0, msgLength - sb.length());
+            }
+            byte[] message = sb.toString().getBytes(StandardCharsets.UTF_8);
             return new ProducerRecord<>(topic, message);
         }
 
-        private void unthrottled(KafkaProducer<byte[], byte[]> producer, long startTimeMs, long finishTimeMs, byte[] spaceBytes) {
-            while (System.currentTimeMillis() < finishTimeMs) {
-                boolean isWarmup = System.currentTimeMillis() < startTimeMs;
-                producer.send(getNextRecord(spaceBytes, isWarmup), isWarmup ? callbackW : callback);
+        private void send(KafkaProducer<byte[], byte[]> producer, long startTimeMs) {
+            boolean isWarmup = System.currentTimeMillis() < startTimeMs;
+            long recordSendStartTime = System.nanoTime() + timeOffs;
+            producer.send(getNextRecord(isWarmup, recordSendStartTime), isWarmup ? callbackW : callback);
+            long recordSendFinishedTime = System.nanoTime() + timeOffs;
+            if (!isWarmup && timeRecorder != null) {
+                timeRecorder.recordTimes(OP_SEND, recordSendStartTime, 0, recordSendFinishedTime, true);
             }
         }
 
-        private void throttled(KafkaProducer<byte[], byte[]> producer, long startTimeMs, long finishTimeMs, byte[] spaceBytes) {
+        private void unthrottled(KafkaProducer<byte[], byte[]> producer, long startTimeMs, long finishTimeMs) {
+            while (System.currentTimeMillis() < finishTimeMs) {
+                send(producer, startTimeMs);
+            }
+        }
+
+        private void throttled(KafkaProducer<byte[], byte[]> producer, long startTimeMs, long finishTimeMs) {
             long timeChunkSizeMs = 10;
             double messageRateMs = messageRate / (1000.0 / timeChunkSizeMs);
             long timeChunkSizeNs = timeChunkSizeMs * 1000000;
@@ -411,8 +462,7 @@ public class KafkaE2EBenchmark implements Benchmark {
                 int i0 = (int) Math.floor(messagesSent);
                 int i1 = (int) Math.floor(messagesSent + messageRateMs);
                 for (int i = i0; i < i1; i++) {
-                    boolean isWarmup = System.currentTimeMillis() < startTimeMs;
-                    producer.send(getNextRecord(spaceBytes, isWarmup), isWarmup ? callbackW : callback);
+                    send(producer, startTimeMs);
                 }
                 messagesSent += messageRateMs;
                 timeChunkCurrentNs = System.nanoTime() - timeChunkStartNs;
@@ -429,14 +479,12 @@ public class KafkaE2EBenchmark implements Benchmark {
         public void run() {
             log("%s started", Thread.currentThread().getName());
             KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(producerProps);
-            byte[] spaceBytes = new byte[messageLengthMax];
-            Arrays.fill(spaceBytes, (byte) ' ');
             long startTimeMs = System.currentTimeMillis() + warmupTime * 1000L;
             long finishTimeMs = System.currentTimeMillis() + (warmupTime + runTime) * 1000L;
             if (messageRate <= 0) {
-                unthrottled(producer, startTimeMs, finishTimeMs, spaceBytes);
+                unthrottled(producer, startTimeMs, finishTimeMs);
             } else {
-                throttled(producer, startTimeMs, finishTimeMs, spaceBytes);
+                throttled(producer, startTimeMs, finishTimeMs);
             }
             producer.flush();
             producer.close();
@@ -465,22 +513,22 @@ public class KafkaE2EBenchmark implements Benchmark {
     }
 
     class ConsumerRunner implements Runnable {
-        private Properties consumerProps;
-        private TimeRecorder timeRecorder;
         private AtomicInteger runningConsumers;
+        private TimeRecorder timeRecorder;
+        private Properties consumerProps;
         private String topic;
-        private int warmupTime;
-        private long pollTimeout;
-        private long messageCount = 0;
         private long messageCountWarmup = 0;
+        private long messageCount = 0;
         private long messageSize = 0;
+        private long pollTimeoutMs;
+        private int warmupTime;
 
         ConsumerRunner(AtomicInteger runningConsumers, Properties consumerProps, TimeRecorder timeRecorder, int warmupTime, KafkaE2EBenchmarkConfig config) {
             this.runningConsumers = runningConsumers;
             this.consumerProps = consumerProps;
             this.timeRecorder = timeRecorder;
             this.warmupTime = warmupTime;
-            this.pollTimeout = config.pollTimeout;
+            this.pollTimeoutMs = config.pollTimeoutMs;
             this.topic = config.topic;
         }
 
@@ -493,26 +541,32 @@ public class KafkaE2EBenchmark implements Benchmark {
             consumer.subscribe(Collections.singletonList(topic));
             consumer.seekToEnd(Collections.emptyList());
             consumer.poll(Duration.ZERO);
-            Duration pollDuration = Duration.ofMillis(pollTimeout);
+            Duration pollDuration = Duration.ofMillis(pollTimeoutMs);
             long startTimeMs = System.currentTimeMillis() + warmupTime * 1000L;
             long endTimeMs = 0;
             while (true) {
                 endTimeMs = System.currentTimeMillis();
+                long recordPollStartTime = System.nanoTime() + timeOffs;
+                boolean isWarmup = System.currentTimeMillis() < startTimeMs;
                 Iterator<ConsumerRecord<byte[], byte[]>> recordIter = consumer.poll(pollDuration).iterator();
+                long recordPollFinishTime = System.nanoTime() + timeOffs;
                 if (!recordIter.hasNext()) {
                     break;
+                }
+                if (System.currentTimeMillis() >= startTimeMs && timeRecorder != null) {
+                    timeRecorder.recordTimes(OP_POLL, recordPollStartTime, 0, recordPollFinishTime, true);
                 }
                 while (recordIter.hasNext()) {
                     ConsumerRecord<byte[], byte[]> consumerRecord = recordIter.next();
                     long recordRecvTime = System.nanoTime() + timeOffs;
                     String read = new String(consumerRecord.value(), StandardCharsets.UTF_8);
-                    boolean isWarmup = Boolean.parseBoolean(read.substring(0, read.indexOf('-')));
+                    // boolean isWarmup = Boolean.parseBoolean(read.substring(0, read.indexOf('-'))) - using time-based warmup instead
                     long recordSendTime = Long.parseLong(read.substring(read.indexOf('-') + 1).trim());
                     if (isWarmup) {
                         messageCountWarmup++;
                     } else {
                         if (timeRecorder != null) {
-                            timeRecorder.recordTimes("msg", recordSendTime, 0, recordRecvTime, true);
+                            timeRecorder.recordTimes(OP_END_TO_END, recordSendTime, 0, recordRecvTime, true);
                         }
                         messageCount++;
                         messageSize += consumerRecord.value().length;
