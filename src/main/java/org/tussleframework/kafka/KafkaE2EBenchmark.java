@@ -32,6 +32,7 @@
 
 package org.tussleframework.kafka;
 
+import static org.tussleframework.tools.FormatTool.NS_IN_S;
 import static org.tussleframework.tools.FormatTool.roundFormat;
 
 import java.nio.charset.StandardCharsets;
@@ -41,7 +42,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
@@ -59,8 +59,8 @@ import org.apache.kafka.clients.admin.ListTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -74,6 +74,16 @@ import org.tussleframework.TimeRecorder;
 import org.tussleframework.tools.ConfigLoader;
 import org.tussleframework.tools.SleepTool;
 
+enum KafkaOp {
+    POLL("poll"), SEND("send"), END_TO_END("end-to-end");
+
+    final String value;
+
+    KafkaOp(String value) {
+        this.value = value;
+    }
+}
+
 public class KafkaE2EBenchmark implements Benchmark {
 
     static final Logger logger = Logger.getLogger(KafkaE2EBenchmark.class.getName());
@@ -81,35 +91,63 @@ public class KafkaE2EBenchmark implements Benchmark {
     static final String RATE_MB_UNITS = "MiB/s";
     static final String TIME_MSGS_UNITS = "ms";
 
-    static final String OP_POLL = "poll";
-    static final String OP_SEND = "send";
-    static final String OP_END_TO_END = "end-to-end";
-    static final String[] operations = {
-            OP_POLL, OP_SEND, OP_END_TO_END
-    };
-
     static final long NS_IN_MS = 1000000L;
 
-    private long totalConsumerMsgCountWarmup;
-    private long totalConsumerMsgCount;
-    private long totalProducerMsgCountW;
-    private long totalProducerMsgCount;
-    private long totalConsumerBytes;
-    private long totalProducerBytes;
-    private long totalProducerErrors;
-    private long consumerTime;
-    private long producerTime;
-    private double totalConsumerThroughput;
-    private double totalProducerThroughput;
-    private double totalConsumerBytesThroughput;
-    private double totalProducerBytesThroughput;
-    private boolean resetRequired = true;
-    private Object consumerLock = new Object();
-    private Object producerLock = new Object();
+    class MsgCounter {
+        long errors;
+        long msgCount;
+        long totalTime;
+        long msgBytes;
+        double bytesThroughput;
+        double msgThroughput;
+
+        synchronized long getCount() {
+            return msgCount;
+        }
+
+        synchronized void add(long count, long size, long errs) {
+            msgCount += count;
+            if (size > 0) {
+                msgBytes += size;
+            }
+            errors += errs;
+        }
+
+        synchronized void accumulate(String name, long startTimeMs, long finishTimeMs, MsgCounter msgCounter) {
+            msgCount += msgCounter.msgCount;
+            msgBytes += msgCounter.msgBytes;
+            errors += msgCounter.errors;
+            double timeDiffS = (finishTimeMs - startTimeMs) / 1000.0;
+            if (totalTime < finishTimeMs - startTimeMs) {
+                totalTime = finishTimeMs - startTimeMs;
+            }
+            if (timeDiffS > 0) {
+                msgThroughput += msgCounter.msgCount / timeDiffS;
+                bytesThroughput += msgCounter.msgBytes / timeDiffS;
+            }
+            log("%s, %d messages, time %s", name, msgCounter.msgCount, roundFormat(timeDiffS));
+        }
+
+        void print(String name) {
+            log("%s msgs rate: %s %s", name, roundFormat(msgThroughput), RATE_MSGS_UNITS);
+            log("%s xfer rate: %s %s", name, roundFormat(bytesThroughput / 1024. / 1024.), RATE_MB_UNITS);
+            log("%s msgs count: %d", name, msgCount);
+            log("%s xfer size: %s MiB (%d)", name, roundFormat(msgBytes / 1024. / 1024.), msgBytes);
+            log("%s time: %s ms", name, roundFormat(totalTime));
+            log("%s errors: %d", name, errors);
+        }
+    }
+
     private KafkaE2EBenchmarkConfig config;
-    private AdminClient adminClient;
+    private MsgCounter consumerWarmupCounter;
+    private MsgCounter producerWarmupCounter;
+    private MsgCounter consumerCounter;
+    private MsgCounter producerCounter;
     private Properties consumerProps;
     private Properties producerProps;
+    private AdminClient adminClient;
+    private volatile boolean running;
+    private boolean resetRequired = true;
 
     public static void log(String format, Object... args) {
         if (logger.isLoggable(Level.INFO)) {
@@ -179,7 +217,7 @@ public class KafkaE2EBenchmark implements Benchmark {
 
     private static void sleep(int s, String msg) {
         if (msg != null) {
-            log("Sleeping " + s + " seconds - " + msg);
+            log("Sleeping %s - %s", withS(s, "second"), msg);
         }
         try {
             Thread.sleep(s * 1000L);
@@ -241,19 +279,15 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
         Collection<NewTopic> newTopics = Arrays.asList(newTopic);
         try {
-            log("Creating new topic '%s' with %s, replication-factor %d, topic timeout %d", config.topic, withS(config.partitions, "partition"), config.replicationFactor, config.createTopicTimeout);
+            log("Creating new topic '%s' with %s, replication-factor %d", config.topic, withS(config.partitions, "partition"), config.replicationFactor);
             CreateTopicsOptions createTopicsOptions = new CreateTopicsOptions();
-            if (config.createTopicTimeout > 0) {
-                createTopicsOptions.timeoutMs(config.createTopicTimeout);
-            }
             CreateTopicsResult result = adminClient.createTopics(newTopics, createTopicsOptions);
             result.all().get();
             log("Topic created: '%s'", config.topic);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            if (e instanceof org.apache.kafka.common.errors.TopicExistsException ||
-                e.getCause() instanceof org.apache.kafka.common.errors.TopicExistsException) {
+            if (e instanceof org.apache.kafka.common.errors.TopicExistsException || e.getCause() instanceof org.apache.kafka.common.errors.TopicExistsException) {
                 log("Topic created: '%s' - TopicExistsException", config.topic);
                 return;
             }
@@ -264,35 +298,27 @@ public class KafkaE2EBenchmark implements Benchmark {
     @Override
     public RunResult run(double targetRate, int warmupTime, int runTime, TimeRecorder timeRecorder) {
         if (timeRecorder != null) {
-            for (String op: operations) {
-                timeRecorder.startRecording(op, RATE_MSGS_UNITS, TIME_MSGS_UNITS);
+            for (KafkaOp op : KafkaOp.values()) {
+                timeRecorder.startRecording(op.value, RATE_MSGS_UNITS, TIME_MSGS_UNITS);
             }
         }
         double perProducerMessageRate = targetRate / config.producers;
+        running = true;
         resetRequired = true;
-        consumerTime = 0;
-        producerTime = 0;
-        totalProducerMsgCount = 0;
-        totalConsumerMsgCount = 0;
-        totalProducerMsgCountW = 0;
-        totalConsumerMsgCountWarmup = 0;
-        totalConsumerBytes = 0;
-        totalProducerBytes = 0;
-        totalProducerErrors = 0;
-        totalProducerThroughput = 0;
-        totalConsumerThroughput = 0;
-        totalConsumerBytesThroughput = 0;
-        totalProducerBytesThroughput = 0;
-        AtomicInteger running = new AtomicInteger();
-        running.set(config.consumers + config.producers);
+        consumerCounter = new MsgCounter();
+        producerCounter = new MsgCounter();
+        consumerWarmupCounter = new MsgCounter();
+        producerWarmupCounter = new MsgCounter();
+        AtomicInteger runningCount = new AtomicInteger();
+        runningCount.set(config.consumers + config.producers);
         ArrayList<Thread> consumerThreads = new ArrayList<>();
         for (int i = 1; i <= config.consumers; i++) {
-            ConsumerRunner cr = new ConsumerRunner(running, consumerProps, timeRecorder, warmupTime, config);
+            ConsumerRunner cr = new ConsumerRunner(runningCount, timeRecorder, warmupTime);
             consumerThreads.add(new Thread(cr, "Consumer_" + roundFormat(targetRate) + "_" + i));
         }
         ArrayList<Thread> producerThreads = new ArrayList<>();
         for (int i = 1; i <= config.producers; i++) {
-            ProducerRunner pr = new ProducerRunner(running, producerProps, timeRecorder, warmupTime, runTime, perProducerMessageRate, config);
+            ProducerRunner pr = new ProducerRunner(runningCount, timeRecorder, warmupTime, runTime, perProducerMessageRate);
             producerThreads.add(new Thread(pr, "Producer_" + (int) targetRate + "_" + i));
         }
         String ps = withS(config.producers, "producer");
@@ -301,7 +327,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         consumerThreads.forEach(Thread::start);
         producerThreads.forEach(Thread::start);
         long start = System.currentTimeMillis();
-        while (running.get() > 0) {
+        while (runningCount.get() > 0) {
             sleep(1, null);
             long spentTime = System.currentTimeMillis() - start;
             double progress = spentTime / 1000.0 / (warmupTime + runTime);
@@ -310,27 +336,34 @@ public class KafkaE2EBenchmark implements Benchmark {
             }
         }
         producerThreads.forEach(KafkaE2EBenchmark::join);
+        if (timeRecorder != null) {
+            timeRecorder.stopRecording();
+        }
+        waitConsumers();
         consumerThreads.forEach(KafkaE2EBenchmark::join);
         log("Requested MR: %s %s", roundFormat(targetRate), RATE_MSGS_UNITS);
-        log("Producer MR: %s %s", roundFormat(totalProducerThroughput), RATE_MSGS_UNITS);
-        log("Consumer MR: %s %s", roundFormat(totalConsumerThroughput), RATE_MSGS_UNITS);
-        log("Producer %s %s", roundFormat(totalProducerBytesThroughput / 1024. / 1024.), RATE_MB_UNITS);
-        log("Consumer %s %s", roundFormat(totalConsumerBytesThroughput / 1024. / 1024.), RATE_MB_UNITS);
-        log("Producer msgs count: %d", totalProducerMsgCount);
-        log("Consumer msgs count: %d", totalConsumerMsgCount);
-        log("Producer total sent: %s MiB (%d)", roundFormat(totalProducerBytes / 1024. / 1024.), totalProducerBytes);
-        log("Consumer total read: %s MiB (%d)", roundFormat(totalConsumerBytes / 1024. / 1024.), totalConsumerBytes);
-        log("Producer errors: %d", totalProducerErrors);
-        log("Producer time: %s ms", roundFormat(producerTime));
-        log("Consumer time: %s ms", roundFormat(consumerTime));
-        log("Producer msgs count during warmup: %d", totalProducerMsgCountW);
-        log("Consumer msgs count during warmup: %d", totalConsumerMsgCountWarmup);
+        if (producerWarmupCounter.getCount() > 0) {
+            producerWarmupCounter.print("Producer (warmup)");
+            consumerWarmupCounter.print("Consumer (warmup)");
+        }
+        producerCounter.print("Producer");
+        consumerCounter.print("Consumer");
         return RunResult.builder()
                 .rateUnits(RATE_MSGS_UNITS)
-                .rate(totalProducerThroughput)
-                .time(producerTime)
-                .count(totalConsumerMsgCount)
-                .errors(totalProducerErrors).build();
+                .time(producerCounter.totalTime)
+                .rate(producerCounter.msgThroughput)
+                .count(consumerCounter.msgCount)
+                .errors(producerCounter.errors)
+                .build();
+    }
+
+    public void waitConsumers() {
+        int i = 0;
+        while (consumerWarmupCounter.getCount() + consumerCounter.getCount() < producerWarmupCounter.getCount() + producerCounter.getCount() && i < 3) {
+            i++;
+            sleep(1, "waiting for consumer(s) (" + i + ")");
+        }
+        running = false;        
     }
 
     @Override
@@ -376,48 +409,29 @@ public class KafkaE2EBenchmark implements Benchmark {
 
     class ProducerRunner implements Runnable {
         private AtomicInteger runningProducers;
+        private KafkaThrottleMode throttleMode;
         private TimeRecorder timeRecorder;
-        private Properties producerProps;
+        private MsgCounter msgCounter = new MsgCounter();
+        private MsgCounter warmupMsgCounter = new MsgCounter();
+        private Random random = new Random(0); // repeatable pseudo random sequence
         private String topic;
         private double messageRate;
         private int messageLengthMax;
         private int messageLength;
         private int warmupTime;
         private int runTime;
-        private long messageCount = 0;
-        private long messageCountW = 0;
-        private long messageSize = 0;
-        private long errorCount = 0;
+        private long sentTime;
         private long timeOffs = System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
-        private Random random = new Random(0); // repeatable pseudo random sequence
         private char[] spaceChars;
 
-        private Callback callback = (RecordMetadata metadata, Exception e) -> {
-            if (e == null) {
-                messageCount++;
-                int s = metadata.serializedValueSize();
-                if (s > 0) {
-                    messageSize += s;
-                }
-            } else {
-                errorCount++;
-            }
-        };
-
-        private Callback callbackW = (RecordMetadata metadata, Exception e) -> {
-            if (e == null) {
-                messageCountW++;
-            }
-        };
-
-        ProducerRunner(AtomicInteger runningProducers, Properties producerProps, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate, KafkaE2EBenchmarkConfig config) {
+        ProducerRunner(AtomicInteger runningProducers, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate) {
             this.runningProducers = runningProducers;
-            this.producerProps = producerProps;
             this.timeRecorder = timeRecorder;
+            this.messageRate = messageRate;
             this.warmupTime = warmupTime;
             this.runTime = runTime;
-            this.messageRate = messageRate;
             this.topic = config.topic;
+            this.throttleMode = config.throttleMode;
             this.messageLength = config.messageLength;
             this.messageLengthMax = config.messageLengthMax > config.messageLength ? config.messageLengthMax : config.messageLength;
             this.spaceChars = new char[messageLengthMax];
@@ -434,35 +448,58 @@ public class KafkaE2EBenchmark implements Benchmark {
             byte[] message = sb.toString().getBytes(StandardCharsets.UTF_8);
             return new ProducerRecord<>(topic, message);
         }
-
-        private void send(KafkaProducer<byte[], byte[]> producer, long startTimeMs) {
-            boolean isWarmup = System.currentTimeMillis() < startTimeMs;
-            long recordSendStartTime = System.nanoTime() + timeOffs;
-            producer.send(getNextRecord(isWarmup, recordSendStartTime), isWarmup ? callbackW : callback);
-            long recordSendFinishedTime = System.nanoTime() + timeOffs;
-            if (!isWarmup && timeRecorder != null) {
-                timeRecorder.recordTimes(OP_SEND, recordSendStartTime, 0, recordSendFinishedTime, true);
+        
+        private void send(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs) {
+            final boolean isWarmup = System.currentTimeMillis() < startPostWarmupTimeMs;
+            final long recordSendStartTime = System.nanoTime() + timeOffs;
+            if (isWarmup && sentTime < recordSendStartTime) {
+                log("(warmup) sending...");
+                sentTime = recordSendStartTime + NS_IN_S;
             }
+            producer.send(getNextRecord(isWarmup, recordSendStartTime), (RecordMetadata metadata, Exception e) -> {
+                long recordSendFinishedTime = System.nanoTime() + timeOffs;
+                if (e == null) {
+                    int s = metadata.serializedValueSize();
+                    (isWarmup ? warmupMsgCounter : msgCounter).add(1, s, 0);
+                    if (!isWarmup && timeRecorder != null) {
+                        timeRecorder.recordTimes(KafkaOp.SEND.value, recordSendStartTime, 0, recordSendFinishedTime, 1, true);
+                    }
+                } else {
+                    (isWarmup ? warmupMsgCounter : msgCounter).add(0, 0, 1);
+                }
+            });
         }
 
-        private void unthrottled(KafkaProducer<byte[], byte[]> producer, long startTimeMs, long finishTimeMs) {
+        private void unthrottled(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs, long finishTimeMs) {
             while (System.currentTimeMillis() < finishTimeMs) {
-                send(producer, startTimeMs);
+                send(producer, startPostWarmupTimeMs);
             }
         }
 
-        private void throttled(KafkaProducer<byte[], byte[]> producer, long startTimeMs, long finishTimeMs) {
+        private void throttledNew(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs, long finishTimeMs) {
+            long opIndex = 0;
+            long delayBetweenOps = (long) (NS_IN_S / messageRate);
+            long startRunTime = System.nanoTime();
+            while (System.currentTimeMillis() < finishTimeMs) {
+                send(producer, startPostWarmupTimeMs);
+                opIndex++;
+                long intendedNextStartTime = (startRunTime + opIndex * delayBetweenOps);
+                SleepTool.sleepUntil(intendedNextStartTime);
+            }
+        }
+
+        private void throttled(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs, long finishTimeMs) {
             long timeChunkSizeMs = 10;
-            double messageRateMs = messageRate / (1000.0 / timeChunkSizeMs);
             long timeChunkSizeNs = timeChunkSizeMs * 1000000;
             long timeChunkCurrentNs = 0;
             long timeChunkStartNs = System.nanoTime();
+            double messageRateMs = messageRate / (1000.0 / timeChunkSizeMs);
             double messagesSent = 0;
             while (System.currentTimeMillis() < finishTimeMs) {
                 int i0 = (int) Math.floor(messagesSent);
                 int i1 = (int) Math.floor(messagesSent + messageRateMs);
                 for (int i = i0; i < i1; i++) {
-                    send(producer, startTimeMs);
+                    send(producer, startPostWarmupTimeMs);
                 }
                 messagesSent += messageRateMs;
                 timeChunkCurrentNs = System.nanoTime() - timeChunkStartNs;
@@ -479,56 +516,36 @@ public class KafkaE2EBenchmark implements Benchmark {
         public void run() {
             log("%s started", Thread.currentThread().getName());
             KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(producerProps);
-            long startTimeMs = System.currentTimeMillis() + warmupTime * 1000L;
-            long finishTimeMs = System.currentTimeMillis() + (warmupTime + runTime) * 1000L;
+            long startWarmupTimeMs = System.currentTimeMillis();
+            long startPostWarmupTimeMs = startWarmupTimeMs + warmupTime * 1000L;
+            long finishTimeMs = startWarmupTimeMs + (warmupTime + runTime) * 1000L;
             if (messageRate <= 0) {
-                unthrottled(producer, startTimeMs, finishTimeMs);
+                unthrottled(producer, startPostWarmupTimeMs, finishTimeMs);
+            } else if (throttleMode == KafkaThrottleMode.EVEN) {
+                throttledNew(producer, startPostWarmupTimeMs, finishTimeMs);
             } else {
-                throttled(producer, startTimeMs, finishTimeMs);
+                throttled(producer, startPostWarmupTimeMs, finishTimeMs);
             }
             producer.flush();
             producer.close();
-            recordFinish(startTimeMs);
+            producerWarmupCounter.accumulate(Thread.currentThread().getName() + " (warmup)", startWarmupTimeMs, startPostWarmupTimeMs, warmupMsgCounter);
+            producerCounter.accumulate(Thread.currentThread().getName(), startPostWarmupTimeMs, finishTimeMs, msgCounter);
             runningProducers.decrementAndGet();
-        }
-
-        private void recordFinish(long startTimeMs) {
-            long endTimeMs = System.currentTimeMillis();
-            double timeDiffS = (endTimeMs - startTimeMs) / 1000.0;
-            synchronized (producerLock) {
-                if (producerTime < endTimeMs - startTimeMs) {
-                    producerTime = endTimeMs - startTimeMs;
-                }
-                totalProducerMsgCount += messageCount;
-                totalProducerMsgCountW += messageCountW;
-                totalProducerBytes += messageSize;
-                totalProducerErrors += errorCount;
-                if (timeDiffS > 0) {
-                    totalProducerThroughput += messageCount / timeDiffS;
-                    totalProducerBytesThroughput += messageSize / timeDiffS;
-                }
-            }
-            log("%s finished, sent %d messages, time %s", Thread.currentThread().getName(), messageCount, roundFormat(timeDiffS));
         }
     }
 
     class ConsumerRunner implements Runnable {
         private AtomicInteger runningConsumers;
         private TimeRecorder timeRecorder;
-        private Properties consumerProps;
+        private MsgCounter msgCounter = new MsgCounter();
+        private MsgCounter warmupMsgCounter = new MsgCounter();
         private String topic;
-        private long messageCountWarmup = 0;
-        private long messageCount = 0;
-        private long messageSize = 0;
-        private long pollTimeoutMs;
         private int warmupTime;
 
-        ConsumerRunner(AtomicInteger runningConsumers, Properties consumerProps, TimeRecorder timeRecorder, int warmupTime, KafkaE2EBenchmarkConfig config) {
+        ConsumerRunner(AtomicInteger runningConsumers, TimeRecorder timeRecorder, int warmupTime) {
             this.runningConsumers = runningConsumers;
-            this.consumerProps = consumerProps;
             this.timeRecorder = timeRecorder;
             this.warmupTime = warmupTime;
-            this.pollTimeoutMs = config.pollTimeoutMs;
             this.topic = config.topic;
         }
 
@@ -537,62 +554,39 @@ public class KafkaE2EBenchmark implements Benchmark {
             long timeOffs = System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
             log("%s started", Thread.currentThread().getName());
             KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(consumerProps);
-            // This will block until a connection comes in
             consumer.subscribe(Collections.singletonList(topic));
-            consumer.seekToEnd(Collections.emptyList());
-            consumer.poll(Duration.ZERO);
-            Duration pollDuration = Duration.ofMillis(pollTimeoutMs);
-            long startTimeMs = System.currentTimeMillis() + warmupTime * 1000L;
-            long endTimeMs = 0;
-            while (true) {
-                endTimeMs = System.currentTimeMillis();
+            Duration pollDuration = Duration.ofMillis(config.pollTimeoutMs);
+            long startWarmupTimeMs = System.currentTimeMillis();
+            long startPostWarmupTimeMs = startWarmupTimeMs + warmupTime * 1000L;
+            while (running) {
                 long recordPollStartTime = System.nanoTime() + timeOffs;
-                boolean isWarmup = System.currentTimeMillis() < startTimeMs;
-                Iterator<ConsumerRecord<byte[], byte[]>> recordIter = consumer.poll(pollDuration).iterator();
+                boolean isWarmup = System.currentTimeMillis() < startPostWarmupTimeMs;
+                ConsumerRecords<byte[], byte[]> records = consumer.poll(pollDuration);
                 long recordPollFinishTime = System.nanoTime() + timeOffs;
-                if (!recordIter.hasNext()) {
-                    break;
-                }
-                if (System.currentTimeMillis() >= startTimeMs && timeRecorder != null) {
-                    timeRecorder.recordTimes(OP_POLL, recordPollStartTime, 0, recordPollFinishTime, true);
-                }
-                while (recordIter.hasNext()) {
-                    ConsumerRecord<byte[], byte[]> consumerRecord = recordIter.next();
+                long count = 0;
+                for (ConsumerRecord<byte[], byte[]> consumerRecord : records) {
                     long recordRecvTime = System.nanoTime() + timeOffs;
                     String read = new String(consumerRecord.value(), StandardCharsets.UTF_8);
-                    // boolean isWarmup = Boolean.parseBoolean(read.substring(0, read.indexOf('-'))) - using time-based warmup instead
                     long recordSendTime = Long.parseLong(read.substring(read.indexOf('-') + 1).trim());
                     if (isWarmup) {
-                        messageCountWarmup++;
+                        warmupMsgCounter.add(1, consumerRecord.value().length, 0);
                     } else {
+                        count++;
                         if (timeRecorder != null) {
-                            timeRecorder.recordTimes(OP_END_TO_END, recordSendTime, 0, recordRecvTime, true);
+                            timeRecorder.recordTimes(KafkaOp.END_TO_END.value, recordSendTime, 0, recordRecvTime, 1, true);
                         }
-                        messageCount++;
-                        messageSize += consumerRecord.value().length;
+                        msgCounter.add(1, consumerRecord.value().length, 0);
                     }
+                }
+                if (System.currentTimeMillis() >= startPostWarmupTimeMs && timeRecorder != null) {
+                    timeRecorder.recordTimes(KafkaOp.POLL.value, recordPollStartTime, 0, recordPollFinishTime, count, true);
                 }
             }
             consumer.close();
-            recordFinish(startTimeMs, endTimeMs);
+            long finishTimeMs = System.currentTimeMillis();
+            consumerWarmupCounter.accumulate(Thread.currentThread().getName() + " (warmup)", startWarmupTimeMs, startPostWarmupTimeMs, warmupMsgCounter);
+            consumerCounter.accumulate(Thread.currentThread().getName(), startPostWarmupTimeMs, finishTimeMs, msgCounter);
             runningConsumers.decrementAndGet();
-        }
-
-        private void recordFinish(long startTimeMs, long endTimeMs) {
-            double timeDiffS = (endTimeMs - startTimeMs) / 1000.0;
-            synchronized (consumerLock) {
-                if (consumerTime < endTimeMs - startTimeMs) {
-                    consumerTime = endTimeMs - startTimeMs;
-                }
-                totalConsumerMsgCount += messageCount;
-                totalConsumerMsgCountWarmup += messageCountWarmup;
-                totalConsumerBytes += messageSize;
-                if (timeDiffS > 0) {
-                    totalConsumerThroughput += messageCount / timeDiffS;
-                    totalConsumerBytesThroughput += messageSize / timeDiffS;
-                }
-            }
-            log("%s finished, read %d messages, time %s", Thread.currentThread().getName(), messageCount, roundFormat(timeDiffS));
         }
     }
 }
