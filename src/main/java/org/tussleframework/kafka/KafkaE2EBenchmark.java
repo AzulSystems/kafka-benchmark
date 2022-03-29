@@ -438,7 +438,7 @@ public class KafkaE2EBenchmark implements Benchmark {
             Arrays.fill(this.spaceChars, ' ');
         }
 
-        private ProducerRecord<byte[], byte[]> getNextRecord(boolean isWarmup, long recordSendTime) {
+        private ProducerRecord<byte[], byte[]> getNextRecord(boolean isWarmup, long recordSendTime, long recordSendStartTime) {
             int msgLength = messageLength + (messageLengthMax > messageLength ? random.nextInt(messageLengthMax - messageLength) : 0);
             StringBuilder sb = new StringBuilder();
             sb.append(isWarmup).append('-').append(recordSendTime);
@@ -449,20 +449,19 @@ public class KafkaE2EBenchmark implements Benchmark {
             return new ProducerRecord<>(topic, message);
         }
         
-        private void send(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs) {
-            final boolean isWarmup = System.currentTimeMillis() < startPostWarmupTimeMs;
-            final long recordSendStartTime = System.nanoTime() + timeOffs;
+        private void send(KafkaProducer<byte[], byte[]> producer, boolean isWarmup, long intendedNextStartTime) {
+            long recordSendStartTime = System.nanoTime() + timeOffs;
             if (isWarmup && sentTime < recordSendStartTime) {
-                log("(warmup) sending...");
+                log("warmup...");
                 sentTime = recordSendStartTime + NS_IN_S;
             }
-            producer.send(getNextRecord(isWarmup, recordSendStartTime), (RecordMetadata metadata, Exception e) -> {
+            producer.send(getNextRecord(isWarmup, recordSendStartTime, recordSendStartTime), (RecordMetadata metadata, Exception e) -> {
                 long recordSendFinishedTime = System.nanoTime() + timeOffs;
                 if (e == null) {
                     int s = metadata.serializedValueSize();
                     (isWarmup ? warmupMsgCounter : msgCounter).add(1, s, 0);
                     if (!isWarmup && timeRecorder != null) {
-                        timeRecorder.recordTimes(KafkaOp.SEND.value, recordSendStartTime, 0, recordSendFinishedTime, 1, true);
+                        timeRecorder.recordTimes(KafkaOp.SEND.value, recordSendStartTime, intendedNextStartTime, recordSendFinishedTime, 1, true);
                     }
                 } else {
                     (isWarmup ? warmupMsgCounter : msgCounter).add(0, 0, 1);
@@ -472,23 +471,25 @@ public class KafkaE2EBenchmark implements Benchmark {
 
         private void unthrottled(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs, long finishTimeMs) {
             while (System.currentTimeMillis() < finishTimeMs) {
-                send(producer, startPostWarmupTimeMs);
+                boolean isWarmup = System.currentTimeMillis() < startPostWarmupTimeMs;
+                send(producer, isWarmup, 0);
             }
         }
 
-        private void throttledNew(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs, long finishTimeMs) {
+        private void throttleEven(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs, long finishTimeMs) {
             long opIndex = 0;
             long delayBetweenOps = (long) (NS_IN_S / messageRate);
             long startRunTime = System.nanoTime();
             while (System.currentTimeMillis() < finishTimeMs) {
-                send(producer, startPostWarmupTimeMs);
-                opIndex++;
+                boolean isWarmup = System.currentTimeMillis() < startPostWarmupTimeMs;
                 long intendedNextStartTime = (startRunTime + opIndex * delayBetweenOps);
+                send(producer, isWarmup, isWarmup ? 0 : intendedNextStartTime + timeOffs);
+                opIndex++;
                 SleepTool.sleepUntil(intendedNextStartTime);
             }
         }
 
-        private void throttled(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs, long finishTimeMs) {
+        private void throttleInt(KafkaProducer<byte[], byte[]> producer, long startPostWarmupTimeMs, long finishTimeMs) {
             long timeChunkSizeMs = 10;
             long timeChunkSizeNs = timeChunkSizeMs * 1000000;
             long timeChunkCurrentNs = 0;
@@ -499,7 +500,8 @@ public class KafkaE2EBenchmark implements Benchmark {
                 int i0 = (int) Math.floor(messagesSent);
                 int i1 = (int) Math.floor(messagesSent + messageRateMs);
                 for (int i = i0; i < i1; i++) {
-                    send(producer, startPostWarmupTimeMs);
+                    boolean isWarmup = System.currentTimeMillis() < startPostWarmupTimeMs;
+                    send(producer, isWarmup, 0);
                 }
                 messagesSent += messageRateMs;
                 timeChunkCurrentNs = System.nanoTime() - timeChunkStartNs;
@@ -521,10 +523,10 @@ public class KafkaE2EBenchmark implements Benchmark {
             long finishTimeMs = startWarmupTimeMs + (warmupTime + runTime) * 1000L;
             if (messageRate <= 0) {
                 unthrottled(producer, startPostWarmupTimeMs, finishTimeMs);
-            } else if (throttleMode == KafkaThrottleMode.EVEN) {
-                throttledNew(producer, startPostWarmupTimeMs, finishTimeMs);
+            } else if (throttleMode == KafkaThrottleMode.INT) {
+                throttleInt(producer, startPostWarmupTimeMs, finishTimeMs);
             } else {
-                throttled(producer, startPostWarmupTimeMs, finishTimeMs);
+                throttleEven(producer, startPostWarmupTimeMs, finishTimeMs);
             }
             producer.flush();
             producer.close();
