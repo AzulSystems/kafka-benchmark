@@ -9,3 +9,6 @@
 logs
 test*
 histograms*
+results*
+report*
+metrics.json
