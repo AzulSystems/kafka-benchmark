@@ -5,7 +5,7 @@
 .settings
 *.hgrm
 *.jar
-*.log
+*.log*
 logs
 test*
 histograms*

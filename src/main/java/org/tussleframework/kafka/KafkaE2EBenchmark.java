@@ -90,8 +90,11 @@ public class KafkaE2EBenchmark implements Benchmark {
     static final String RATE_MSGS_UNITS = "msg/s";
     static final String RATE_MB_UNITS = "MiB/s";
     static final String TIME_MSGS_UNITS = "ms";
-
     static final long NS_IN_MS = 1000000L;
+
+    static final long nanoTimeOffet() { 
+        return System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
+    }
 
     class MsgCounter {
         long errors;
@@ -297,11 +300,6 @@ public class KafkaE2EBenchmark implements Benchmark {
 
     @Override
     public RunResult run(double targetRate, int warmupTime, int runTime, TimeRecorder timeRecorder) {
-        if (timeRecorder != null) {
-            for (KafkaOp op : KafkaOp.values()) {
-                timeRecorder.startRecording(op.value, RATE_MSGS_UNITS, TIME_MSGS_UNITS);
-            }
-        }
         double perProducerMessageRate = targetRate / config.producers;
         running = true;
         resetRequired = true;
@@ -318,12 +316,17 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
         ArrayList<Thread> producerThreads = new ArrayList<>();
         for (int i = 1; i <= config.producers; i++) {
-            ProducerRunner pr = new ProducerRunner(runningCount, timeRecorder, warmupTime, runTime, perProducerMessageRate);
+            ProducerRunner pr = new ProducerRunner(i, runningCount, timeRecorder, warmupTime, runTime, perProducerMessageRate);
             producerThreads.add(new Thread(pr, "Producer_" + (int) targetRate + "_" + i));
         }
         String ps = withS(config.producers, "producer");
         String cs = withS(config.consumers, "consumer");
         log("Starting %s and %s, targetRate %s, warmupTime %ds, runTime %ds", ps, cs, roundFormat(targetRate), warmupTime, runTime);
+        if (timeRecorder != null) {
+            for (KafkaOp op : KafkaOp.values()) {
+                timeRecorder.startRecording(op.value, RATE_MSGS_UNITS, TIME_MSGS_UNITS);
+            }
+        }
         consumerThreads.forEach(Thread::start);
         producerThreads.forEach(Thread::start);
         long start = System.currentTimeMillis();
@@ -419,16 +422,18 @@ public class KafkaE2EBenchmark implements Benchmark {
         private int messageLengthMax;
         private int messageLength;
         private int warmupTime;
+        private int producerId;
         private int runTime;
-        private long sentTime;
-        private long timeOffs = System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
+        private long warmupPrintTime;
+        private long timeOffs = nanoTimeOffet();
         private char[] spaceChars;
 
-        ProducerRunner(AtomicInteger runningProducers, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate) {
+        ProducerRunner(int producerId, AtomicInteger runningProducers, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate) {
             this.runningProducers = runningProducers;
             this.timeRecorder = timeRecorder;
             this.messageRate = messageRate;
             this.warmupTime = warmupTime;
+            this.producerId = producerId;
             this.runTime = runTime;
             this.topic = config.topic;
             this.throttleMode = config.throttleMode;
@@ -451,9 +456,9 @@ public class KafkaE2EBenchmark implements Benchmark {
 
         private void send(KafkaProducer<byte[], byte[]> producer, boolean isWarmup, long intendedNextStartTime) {
             long recordSendStartTime = System.nanoTime() + timeOffs;
-            if (isWarmup && sentTime < recordSendStartTime) {
+            if (isWarmup && warmupPrintTime < recordSendStartTime && producerId == 1) {
                 log("warmup...");
-                sentTime = recordSendStartTime + NS_IN_S;
+                warmupPrintTime = recordSendStartTime + NS_IN_S * 5;
             }
             producer.send(getNextRecord(recordSendStartTime, intendedNextStartTime), (RecordMetadata metadata, Exception e) -> {
                 long recordSendFinishedTime = System.nanoTime() + timeOffs;
@@ -553,7 +558,7 @@ public class KafkaE2EBenchmark implements Benchmark {
 
         @Override
         public void run() {
-            long timeOffs = System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
+            long timeOffs = nanoTimeOffet();
             log("%s started", Thread.currentThread().getName());
             KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(consumerProps);
             consumer.subscribe(Collections.singletonList(topic));
