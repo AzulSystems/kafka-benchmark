@@ -44,6 +44,7 @@ public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public String brokerList = "localhost:9092"; // list of Kafka brokers
     public String topic = "test";           // Kafka topic used for testing
     public String acks = "1";               // ProducerConfig.ACKS_DOC
+    public boolean idempotence = false;     // ProducerConfig.ENABLE_IDEMPOTENCE_DOC
     public int partitions = 1;              // Kafka topic partitions number used in the topic creation inside benchmark reset() if BenchmarkConfig.reset is true 
     public int replicationFactor = 1;       // Kafka topic replication factor used in the topic creation inside benchmark reset() if BenchmarkConfig.reset is true
     public int waitAfterDeleteTopic = 3;    // seconds, time to do nothing after topic deletion
@@ -52,9 +53,9 @@ public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public int producers = 1;               // number of producer threads 
     public int consumers = 1;               // number of consumer threads
     public int pollTimeoutMs = 100;         // consumer poll timeout 
-    public int batchSize = -1;              // ProducerConfig.BATCH_SIZE_CONFIG
-    public int lingerMs = -1;               // ProducerConfig.LINGER_MS_CONFIG
-    public int retentionMs = -1;            // ProducerConfig.RETENTION_MS_CONFIG
-    public int retentionBytes = -1;         // ProducerConfig.RETENTION_BYTES_CONFIG
-    public int requestTimeoutMs = -1;       // ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG
+    public int batchSize = -1;              // ProducerConfig.BATCH_SIZE_DOC
+    public int lingerMs = -1;               // ProducerConfig.LINGER_MS_DOC
+    public int retentionMs = -1;            // ProducerConfig.RETENTION_MS_DOC
+    public int retentionBytes = -1;         // ProducerConfig.RETENTION_BYTES_DOC
+    public int requestTimeoutMs = -1;       // ProducerConfig.REQUEST_TIMEOUT_MS_DOC
 }

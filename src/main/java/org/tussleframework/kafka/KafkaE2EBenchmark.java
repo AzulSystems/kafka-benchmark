@@ -33,6 +33,7 @@
 package org.tussleframework.kafka;
 
 import static org.tussleframework.tools.FormatTool.NS_IN_S;
+import static org.tussleframework.tools.FormatTool.NS_IN_MS;
 import static org.tussleframework.tools.FormatTool.roundFormat;
 
 import java.nio.charset.StandardCharsets;
@@ -75,7 +76,9 @@ import org.tussleframework.tools.ConfigLoader;
 import org.tussleframework.tools.SleepTool;
 
 enum KafkaOp {
-    POLL("poll"), SEND("send"), END_TO_END("end-to-end");
+    POLL("poll"),
+    SEND("send"),
+    END_TO_END("end-to-end");
 
     final String value;
 
@@ -90,11 +93,7 @@ public class KafkaE2EBenchmark implements Benchmark {
     static final String RATE_MSGS_UNITS = "msg/s";
     static final String RATE_MB_UNITS = "MiB/s";
     static final String TIME_MSGS_UNITS = "ms";
-    static final long NS_IN_MS = 1000000L;
-
-    static final long nanoTimeOffet() { 
-        return System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
-    }
+    static final long NANO_TIME_OFFSET = System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
 
     class MsgCounter {
         long errors;
@@ -120,15 +119,15 @@ public class KafkaE2EBenchmark implements Benchmark {
             msgCount += msgCounter.msgCount;
             msgBytes += msgCounter.msgBytes;
             errors += msgCounter.errors;
-            double timeDiffS = (finishTimeMs - startTimeMs) / 1000.0;
+            double timeDiffSec = (finishTimeMs - startTimeMs) / 1000.0;
             if (totalTime < finishTimeMs - startTimeMs) {
                 totalTime = finishTimeMs - startTimeMs;
             }
-            if (timeDiffS > 0) {
-                msgThroughput += msgCounter.msgCount / timeDiffS;
-                bytesThroughput += msgCounter.msgBytes / timeDiffS;
+            if (timeDiffSec > 0) {
+                msgThroughput += msgCounter.msgCount / timeDiffSec;
+                bytesThroughput += msgCounter.msgBytes / timeDiffSec;
             }
-            log("%s, %d messages, time %s", name, msgCounter.msgCount, roundFormat(timeDiffS));
+            log("%s, %d messages, time %s s", name, msgCounter.msgCount, roundFormat(timeDiffSec));
         }
 
         void print(String name) {
@@ -322,27 +321,20 @@ public class KafkaE2EBenchmark implements Benchmark {
         String ps = withS(config.producers, "producer");
         String cs = withS(config.consumers, "consumer");
         log("Starting %s and %s, targetRate %s, warmupTime %ds, runTime %ds", ps, cs, roundFormat(targetRate), warmupTime, runTime);
+        consumerThreads.forEach(Thread::start);
+        producerThreads.forEach(Thread::start);
+        SleepTool.sleep(warmupTime * NS_IN_S);
         if (timeRecorder != null) {
             for (KafkaOp op : KafkaOp.values()) {
                 timeRecorder.startRecording(op.value, RATE_MSGS_UNITS, TIME_MSGS_UNITS);
             }
         }
-        consumerThreads.forEach(Thread::start);
-        producerThreads.forEach(Thread::start);
-        long start = System.currentTimeMillis();
-        while (runningCount.get() > 0) {
-            sleep(1, null);
-            long spentTime = System.currentTimeMillis() - start;
-            double progress = spentTime / 1000.0 / (warmupTime + runTime);
-            if (progress > 1) {
-                break;
-            }
-        }
+        SleepTool.sleep(runTime * NS_IN_S);
         producerThreads.forEach(KafkaE2EBenchmark::join);
         if (timeRecorder != null) {
             timeRecorder.stopRecording();
         }
-        waitConsumers();
+        running = false;
         consumerThreads.forEach(KafkaE2EBenchmark::join);
         log("Requested MR: %s %s", roundFormat(targetRate), RATE_MSGS_UNITS);
         if (producerWarmupCounter.getCount() > 0) {
@@ -358,15 +350,6 @@ public class KafkaE2EBenchmark implements Benchmark {
                 .count(consumerCounter.msgCount)
                 .errors(producerCounter.errors)
                 .build();
-    }
-
-    public void waitConsumers() {
-        int i = 0;
-        while (consumerWarmupCounter.getCount() + consumerCounter.getCount() < producerWarmupCounter.getCount() + producerCounter.getCount() && i < 3) {
-            i++;
-            sleep(1, "waiting for consumer(s) (" + i + ")");
-        }
-        running = false;        
     }
 
     @Override
@@ -408,6 +391,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         if (config.requestTimeoutMs != -1) {
             props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, config.requestTimeoutMs);
         }
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, config.idempotence);
     }
 
     class ProducerRunner implements Runnable {
@@ -425,9 +409,8 @@ public class KafkaE2EBenchmark implements Benchmark {
         private int producerId;
         private int runTime;
         private long warmupPrintTime;
-        private long timeOffs = nanoTimeOffet();
         private char[] spaceChars;
-
+        
         ProducerRunner(int producerId, AtomicInteger runningProducers, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate) {
             this.runningProducers = runningProducers;
             this.timeRecorder = timeRecorder;
@@ -455,13 +438,13 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
 
         private void send(KafkaProducer<byte[], byte[]> producer, boolean isWarmup, long intendedNextStartTime) {
-            long recordSendStartTime = System.nanoTime() + timeOffs;
+            long recordSendStartTime = System.nanoTime() + NANO_TIME_OFFSET;
             if (isWarmup && warmupPrintTime < recordSendStartTime && producerId == 1) {
                 log("warmup...");
                 warmupPrintTime = recordSendStartTime + NS_IN_S * 5;
             }
             producer.send(getNextRecord(recordSendStartTime, intendedNextStartTime), (RecordMetadata metadata, Exception e) -> {
-                long recordSendFinishedTime = System.nanoTime() + timeOffs;
+                long recordSendFinishedTime = System.nanoTime() + NANO_TIME_OFFSET;
                 if (e == null) {
                     int s = metadata.serializedValueSize();
                     (isWarmup ? warmupMsgCounter : msgCounter).add(1, s, 0);
@@ -489,7 +472,7 @@ public class KafkaE2EBenchmark implements Benchmark {
                 boolean isWarmup = System.currentTimeMillis() < startPostWarmupTimeMs;
                 long intendedNextStartTime = (startRunTime + opIndex * delayBetweenOps);
                 SleepTool.sleepUntil(intendedNextStartTime);
-                send(producer, isWarmup, isWarmup ? 0 : intendedNextStartTime + timeOffs);
+                send(producer, isWarmup, isWarmup ? 0 : intendedNextStartTime + NANO_TIME_OFFSET);
                 opIndex++;
             }
         }
@@ -558,7 +541,6 @@ public class KafkaE2EBenchmark implements Benchmark {
 
         @Override
         public void run() {
-            long timeOffs = nanoTimeOffet();
             log("%s started", Thread.currentThread().getName());
             KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(consumerProps);
             consumer.subscribe(Collections.singletonList(topic));
@@ -566,13 +548,13 @@ public class KafkaE2EBenchmark implements Benchmark {
             long startWarmupTimeMs = System.currentTimeMillis();
             long startPostWarmupTimeMs = startWarmupTimeMs + warmupTime * 1000L;
             while (running) {
-                long recordPollStartTime = System.nanoTime() + timeOffs;
+                long recordPollStartTime = System.nanoTime() + NANO_TIME_OFFSET;
                 boolean isWarmup = System.currentTimeMillis() < startPostWarmupTimeMs;
                 ConsumerRecords<byte[], byte[]> records = consumer.poll(pollDuration);
-                long recordPollFinishTime = System.nanoTime() + timeOffs;
+                long recordPollFinishTime = System.nanoTime() + NANO_TIME_OFFSET;
                 long count = 0;
                 for (ConsumerRecord<byte[], byte[]> consumerRecord : records) {
-                    long recordRecvTime = System.nanoTime() + timeOffs;
+                    long recordRecvTime = System.nanoTime() + NANO_TIME_OFFSET;
                     String read = new String(consumerRecord.value(), StandardCharsets.UTF_8);
                     long recordSendTime = Long.parseLong(read.substring(0, read.indexOf('-')).trim());
                     long recordIntendedSendTime = Long.parseLong(read.substring(read.indexOf('-') + 1).trim());
