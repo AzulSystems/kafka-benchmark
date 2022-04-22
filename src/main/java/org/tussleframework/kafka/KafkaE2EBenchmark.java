@@ -32,9 +32,10 @@
 
 package org.tussleframework.kafka;
 
-import static org.tussleframework.tools.FormatTool.NS_IN_S;
 import static org.tussleframework.tools.FormatTool.NS_IN_MS;
+import static org.tussleframework.tools.FormatTool.NS_IN_S;
 import static org.tussleframework.tools.FormatTool.roundFormat;
+import static org.tussleframework.tools.FormatTool.withS;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -43,10 +44,11 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
-import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -56,7 +58,6 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.CreateTopicsOptions;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.DeleteTopicsResult;
-import org.apache.kafka.clients.admin.ListTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -66,13 +67,16 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
+import org.tussleframework.AbstractConfig;
 import org.tussleframework.Benchmark;
-import org.tussleframework.BenchmarkConfig;
 import org.tussleframework.RunResult;
 import org.tussleframework.TimeRecorder;
+import org.tussleframework.TussleException;
 import org.tussleframework.tools.ConfigLoader;
+import org.tussleframework.tools.FormatTool;
 import org.tussleframework.tools.SleepTool;
 
 enum KafkaOp {
@@ -157,15 +161,11 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
     }
 
-    public static String withS(long count, String name) {
-        if (count == 1 || count == -1) {
-            return count + " " + name;
-        } else {
-            return count + " " + name + "s";
-        }
+    public KafkaE2EBenchmark() {
     }
 
-    public KafkaE2EBenchmark() {
+    public KafkaE2EBenchmark(String[] args) throws TussleException {
+        init(args);
     }
 
     public KafkaE2EBenchmark(KafkaE2EBenchmarkConfig config) {
@@ -174,14 +174,14 @@ public class KafkaE2EBenchmark implements Benchmark {
     }
 
     @Override
-    public void init(String[] args) throws Exception {
-        config = ConfigLoader.load(args, true, KafkaE2EBenchmarkConfig.class);
+    public void init(String[] args) throws TussleException {
+        config = ConfigLoader.loadConfig(args, true, KafkaE2EBenchmarkConfig.class);
         initProps();
     }
 
     @Override
     public void cleanup() {
-        deleteTopic(false);
+        deleteTopics(false);
     }
 
     @Override
@@ -192,8 +192,8 @@ public class KafkaE2EBenchmark implements Benchmark {
     @Override
     public void reset() {
         if (resetRequired) {
-            deleteTopic(true);
-            createTopic();
+            deleteTopics(true);
+            createTopics();
             resetRequired = false;
         }
     }
@@ -228,46 +228,41 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
     }
 
-    public void deleteTopic(boolean wait) {
-        log("Deleting topic '" + config.topic + "'...");
+    public List<String> getTopics() {
+        ArrayList<String> topicNames = new ArrayList<>();
+        for (int i = 1; i <= config.topics; i++) {
+            topicNames.add(config.topic + "_" + i);
+        }
+        return topicNames;
+    }
+
+    public void deleteTopics(boolean wait) {
+        Collection<String> topics = getTopics();
+        String topicsJoin = FormatTool.join(topics, ", ");
+        log("Deleting topic(s): %s...", topicsJoin);
         try {
-            DeleteTopicsResult result = adminClient.deleteTopics(Arrays.asList(config.topic));
+            DeleteTopicsResult result = adminClient.deleteTopics(topics);
             result.all().get();
             if (wait && config.waitAfterDeleteTopic > 0) {
                 sleep(config.waitAfterDeleteTopic, "waiting after topic deletion");
             }
-            log("Topic deleted '" + config.topic + "'");
+            log("Topic deleted '%s'", topicsJoin);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             if (e instanceof UnknownTopicOrPartitionException) {
-                log("Cannot delete topic '" + config.topic + "' " + e);
+                log("Cannot delete existing topic(s): %s - %s", topicsJoin, e);
                 return;
             }
             if (e.getCause() instanceof UnknownTopicOrPartitionException) {
-                log("Cannot delete topic '" + config.topic + "' " + e.getCause());
+                log("Cannot delete existing topic(s): %s - %s", topicsJoin, e.getCause());
                 return;
             }
-            throw new KafkaRuntimeException("Failed to delete topic '" + config.topic + "'", e);
+            throw new KafkaRuntimeException("Failed to delete topic(s): " + topicsJoin, e);
         }
     }
 
-    public boolean checkTopic() throws InterruptedException {
-        ListTopicsResult topics = adminClient.listTopics();
-        try {
-            Set<String> topicsNames = topics.names().get();
-            boolean res = topicsNames.contains(config.topic);
-            log("Topic '" + config.topic + "' exists " + res);
-            return res;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        } catch (Exception e) {
-            throw new KafkaRuntimeException("Failed to ctopic '" + config.topic + "'", e);
-        }
-    }
-
-    public void createTopic() {
+    public void createTopics() {
         Map<String, String> configs = new HashMap<>();
         if (config.retentionMs > 0) {
             configs.put(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(config.retentionMs));
@@ -275,25 +270,64 @@ public class KafkaE2EBenchmark implements Benchmark {
         if (config.retentionBytes > 0) {
             configs.put(TopicConfig.RETENTION_BYTES_CONFIG, String.valueOf(config.retentionBytes));
         }
-        NewTopic newTopic = new NewTopic(config.topic, config.partitions, (short) config.replicationFactor);
-        if (configs.size() > 0) {
-            newTopic.configs(configs);
-        }
-        Collection<NewTopic> newTopics = Arrays.asList(newTopic);
+        ArrayList<NewTopic> newTopics = new ArrayList<>();
+        Collection<String> topics = getTopics();
+        String topicsJoin = FormatTool.join(topics, ", ");
+        topics.forEach(topic -> {
+            NewTopic newTopic = new NewTopic(topic, config.partitions, (short) config.replicationFactor);
+            if (configs.size() > 0) {
+                newTopic.configs(configs);
+            }
+            newTopics.add(newTopic);
+        });
         try {
-            log("Creating new topic '%s' with %s, replication-factor %d", config.topic, withS(config.partitions, "partition"), config.replicationFactor);
+            log("Creating %s: %s, %s, replication-factor %d", withS(topics.size(), "new topic"), topicsJoin, withS(config.partitions, "partition"), config.replicationFactor);
             CreateTopicsOptions createTopicsOptions = new CreateTopicsOptions();
             CreateTopicsResult result = adminClient.createTopics(newTopics, createTopicsOptions);
             result.all().get();
-            log("Topic created: '%s'", config.topic);
+            log("%s created: %s", withS(topics.size(), "new topic"), topicsJoin);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             if (e instanceof org.apache.kafka.common.errors.TopicExistsException || e.getCause() instanceof org.apache.kafka.common.errors.TopicExistsException) {
-                log("Topic created: '%s' - TopicExistsException", config.topic);
-                return;
+                log("%s created: '%s' - TopicExistsException", withS(topics.size(), "topic"), topicsJoin);
+            } else {
+                throw new KafkaRuntimeException("Failed to create topic(s): " + topicsJoin, e);
             }
-            throw new KafkaRuntimeException("Failed to create topic '" + config.topic + "'", e);
+        }
+        if (config.probeTopics) {
+            probeTopics();
+        }
+    }
+
+    public void probeTopics() {
+        getTopics().forEach(this::probeTopic);
+    }
+
+    public void probeTopic(String topic) {
+        log("Probing Kafka topic '%s'...", topic);
+        byte[] message = { 'Z' };
+        try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(producerProps); KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(consumerProps)) {
+            log("Sending probe message...");
+            producer.send(new ProducerRecord<>(topic, message)).get();
+            producer.flush();
+            Collection<org.apache.kafka.common.TopicPartition> topicPartitions = new ArrayList<>();
+            consumer.partitionsFor(topic).forEach(p -> topicPartitions.add(new TopicPartition(p.topic(), p.partition())));
+            consumer.assign(topicPartitions);
+            consumer.seekToBeginning(topicPartitions);
+            for (int i = 1; i <= 300; i++) {
+                log("Polling probe message (#%d)...", i);
+                ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ofMillis(config.pollTimeoutMs));
+                if (records.iterator().hasNext()) {
+                    log("Probe message received (%d)!", records.count());
+                    break;
+                }
+                sleep(1, "waiting after topic poll");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            throw new KafkaRuntimeException("Failed to probe topic '" + topic + "'", e);
         }
     }
 
@@ -306,16 +340,17 @@ public class KafkaE2EBenchmark implements Benchmark {
         producerCounter = new MsgCounter();
         consumerWarmupCounter = new MsgCounter();
         producerWarmupCounter = new MsgCounter();
+        List<String> topics = getTopics();
         AtomicInteger runningCount = new AtomicInteger();
         runningCount.set(config.consumers + config.producers);
         ArrayList<Thread> consumerThreads = new ArrayList<>();
         for (int i = 1; i <= config.consumers; i++) {
-            ConsumerRunner cr = new ConsumerRunner(runningCount, timeRecorder, warmupTime);
+            ConsumerRunner cr = new ConsumerRunner(runningCount, timeRecorder, warmupTime, topics.get((i - 1) % topics.size()));
             consumerThreads.add(new Thread(cr, "Consumer_" + roundFormat(targetRate) + "_" + i));
         }
         ArrayList<Thread> producerThreads = new ArrayList<>();
         for (int i = 1; i <= config.producers; i++) {
-            ProducerRunner pr = new ProducerRunner(i, runningCount, timeRecorder, warmupTime, runTime, perProducerMessageRate);
+            ProducerRunner pr = new ProducerRunner(i, runningCount, timeRecorder, warmupTime, runTime, perProducerMessageRate, topics.get((i - 1) % topics.size()));
             producerThreads.add(new Thread(pr, "Producer_" + (int) targetRate + "_" + i));
         }
         String ps = withS(config.producers, "producer");
@@ -353,7 +388,7 @@ public class KafkaE2EBenchmark implements Benchmark {
     }
 
     @Override
-    public BenchmarkConfig getConfig() {
+    public AbstractConfig getConfig() {
         return config;
     }
 
@@ -410,15 +445,15 @@ public class KafkaE2EBenchmark implements Benchmark {
         private int runTime;
         private long warmupPrintTime;
         private char[] spaceChars;
-        
-        ProducerRunner(int producerId, AtomicInteger runningProducers, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate) {
+
+        ProducerRunner(int producerId, AtomicInteger runningProducers, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate, String topic) {
             this.runningProducers = runningProducers;
             this.timeRecorder = timeRecorder;
             this.messageRate = messageRate;
             this.warmupTime = warmupTime;
             this.producerId = producerId;
             this.runTime = runTime;
-            this.topic = config.topic;
+            this.topic = topic;
             this.throttleMode = config.throttleMode;
             this.messageLength = config.messageLength;
             this.messageLengthMax = config.messageLengthMax > config.messageLength ? config.messageLengthMax : config.messageLength;
@@ -504,7 +539,7 @@ public class KafkaE2EBenchmark implements Benchmark {
 
         @Override
         public void run() {
-            log("%s started", Thread.currentThread().getName());
+            log("%s started on topic '%s'", Thread.currentThread().getName(), topic);
             KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(producerProps);
             long startWarmupTimeMs = System.currentTimeMillis();
             long startPostWarmupTimeMs = startWarmupTimeMs + warmupTime * 1000L;
@@ -532,16 +567,16 @@ public class KafkaE2EBenchmark implements Benchmark {
         private String topic;
         private int warmupTime;
 
-        ConsumerRunner(AtomicInteger runningConsumers, TimeRecorder timeRecorder, int warmupTime) {
+        ConsumerRunner(AtomicInteger runningConsumers, TimeRecorder timeRecorder, int warmupTime, String topic) {
             this.runningConsumers = runningConsumers;
             this.timeRecorder = timeRecorder;
             this.warmupTime = warmupTime;
-            this.topic = config.topic;
+            this.topic = topic;
         }
 
         @Override
         public void run() {
-            log("%s started", Thread.currentThread().getName());
+            log("%s started on topic '%s'", Thread.currentThread().getName(), topic);
             KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(consumerProps);
             consumer.subscribe(Collections.singletonList(topic));
             Duration pollDuration = Duration.ofMillis(config.pollTimeoutMs);

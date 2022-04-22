@@ -32,12 +32,12 @@
 
 package org.tussleframework.kafka;
 
-import org.tussleframework.BasicRunner;
+import org.tussleframework.Run;
 import org.tussleframework.tools.LoggerTool;
 
 public class KafkaE2EBenchmarkRunner {
     public static void main(String[] args) {
         LoggerTool.init("benchmark");
-        new BasicRunner().run(KafkaE2EBenchmark.class, args);
+        Run.run(new KafkaE2EBenchmark(), args);
     }
 }

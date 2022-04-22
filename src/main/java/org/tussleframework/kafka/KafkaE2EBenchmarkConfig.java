@@ -32,30 +32,51 @@
 
 package org.tussleframework.kafka;
 
-import org.tussleframework.BenchmarkConfig;
+import org.tussleframework.AbstractConfig;
 
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 @Data
-@EqualsAndHashCode(callSuper = true)
-public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
+@EqualsAndHashCode(callSuper = false)
+public class KafkaE2EBenchmarkConfig implements AbstractConfig {
     public KafkaThrottleMode throttleMode;  // use throttling method for reaching target rate  
     public String brokerList = "localhost:9092"; // list of Kafka brokers
     public String topic = "test";           // Kafka topic used for testing
     public String acks = "1";               // ProducerConfig.ACKS_DOC
     public boolean idempotence = false;     // ProducerConfig.ENABLE_IDEMPOTENCE_DOC
-    public int partitions = 1;              // Kafka topic partitions number used in the topic creation inside benchmark reset() if BenchmarkConfig.reset is true 
-    public int replicationFactor = 1;       // Kafka topic replication factor used in the topic creation inside benchmark reset() if BenchmarkConfig.reset is true
+    public boolean probeTopics = false;     // perform message probe
+    public int topics = 1;                  // Kafka topic number
+    public int partitions = 1;              // Kafka topic partitions number 
+    public int replicationFactor = 1;       // Kafka topic replication factor
     public int waitAfterDeleteTopic = 3;    // seconds, time to do nothing after topic deletion
     public int messageLength = 1024;        // minimum size of a message in bytes
     public int messageLengthMax = 0;        // maximum size of a message in bytes if > messageLength, else = messageLength
-    public int producers = 1;               // number of producer threads 
-    public int consumers = 1;               // number of consumer threads
+    public int producers = 1;               // number of producers 
+    public int consumers = 1;               // number of consumers
     public int pollTimeoutMs = 100;         // consumer poll timeout 
     public int batchSize = -1;              // ProducerConfig.BATCH_SIZE_DOC
     public int lingerMs = -1;               // ProducerConfig.LINGER_MS_DOC
     public int retentionMs = -1;            // ProducerConfig.RETENTION_MS_DOC
     public int retentionBytes = -1;         // ProducerConfig.RETENTION_BYTES_DOC
     public int requestTimeoutMs = -1;       // ProducerConfig.REQUEST_TIMEOUT_MS_DOC
+
+    @Override
+    public void validate(boolean runMode) {
+        if (topics < 1) {
+            throw new IllegalArgumentException(String.format("Invalid topics(%d) - should be positive", topics));
+        }
+        if (partitions < 1) {
+            throw new IllegalArgumentException(String.format("Invalid partitions(%d) - should be positive", partitions));
+        }
+        if (replicationFactor < 1) {
+            throw new IllegalArgumentException(String.format("Invalid replicationFactor(%d) - should be positive", replicationFactor));
+        }
+        if (producers < 1) {
+            throw new IllegalArgumentException(String.format("Invalid producers(%d) - should be positive", producers));
+        }
+        if (consumers < 1) {
+            throw new IllegalArgumentException(String.format("Invalid consumers(%d) - should be positive", consumers));
+        }
+    }
 }
