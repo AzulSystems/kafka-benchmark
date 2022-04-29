@@ -12,17 +12,20 @@ The benchmark measures and reports:
 Build:
 
 ```
-# requires: java, maven
-$ ./build.sh
+$ mvn package # builds target/*jar, needs prebuilt tussle-framework
+
+   -= or =-
+
+$ ./build.sh # builds dependency ../tussle-framework and kafka-benchmark jar
 ```
 
 Run:
 
 ```
-# requires: java
 $ java -jar kafka-benchmark-*.jar [benchmark-parameters] [--runner runner-class [runner-parameters]]
 where benchmark-parameters and runner-parameters have following format:
 [-f yaml-file | -s yaml-string | -p prop1=value1 -p prop2=value2 ...]
+default runner: BasicRunner (org.tussleframework.runners.BasicRunner)
 ```
 
 Kafka E2E Benchmark Parameters:
@@ -50,11 +53,11 @@ idempotence - ProducerConfig.ENABLE_IDEMPOTENCE_DOC
 BasicRunner Parameters:
 
 ```
-targetRate - op/s, expected target throughput, 0 - unlimited (unthrottled) target rate
-warmupTime - sec, test warmup time
-runTime - sec, test run time
-runSteps - number of benchmark run iteration, default 1
-reset - call reset before each benchmark run
+targetRate - op/s, expected target throughput, 0 - unlimited (unthrottled) target rate (default 1k)
+warmupTime - sec, benchmark warmup time (default 0)
+runTime - sec, benchmark run time (default 1m)
+runSteps - number of benchmark run iteration (default 1)
+reset - call reset before each benchmark run (default true)
 ```
 
 Run examples:
@@ -232,6 +235,7 @@ Kafka benchmark parameters:
 Benchmark's command line:
 
 ```
-$ java -jar kafka-benchmark-*.jar consumers=3 partitions=3 producers=15 rf=3 --runner BasicRunner targetRate=0 warmupTime=1m runTime=10m
+$ java -jar kafka-benchmark-*.jar consumers=3 partitions=3 producers=15 rf=3 \
+--runner BasicRunner targetRate=0 warmupTime=1m runTime=10m
 
 ```

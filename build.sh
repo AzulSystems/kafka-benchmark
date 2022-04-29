@@ -32,7 +32,7 @@
 
 KAFKA_BASE_DIR=$(cd $(dirname $0); pwd)
 
-bash "${KAFKA_BASE_DIR}/../benchmarks-common/build.sh"
+bash "${KAFKA_BASE_DIR}/../tussle-framework/build.sh" || exit 1
 
 cd "${KAFKA_BASE_DIR}" || exit 1
 echo "Building $(pwd)..."
