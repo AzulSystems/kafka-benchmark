@@ -238,7 +238,7 @@ public class KafkaE2EBenchmark implements Benchmark {
 
     public void deleteTopics(boolean wait) {
         Collection<String> topics = getTopics();
-        String topicsJoin = FormatTool.join(topics, ", ");
+        String topicsJoin = FormatTool.join(",", topics);
         log("Deleting topic(s): %s...", topicsJoin);
         try {
             DeleteTopicsResult result = adminClient.deleteTopics(topics);
@@ -272,7 +272,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
         ArrayList<NewTopic> newTopics = new ArrayList<>();
         Collection<String> topics = getTopics();
-        String topicsJoin = FormatTool.join(topics, ", ");
+        String topicsJoin = FormatTool.join(",", topics);
         topics.forEach(topic -> {
             NewTopic newTopic = new NewTopic(topic, config.partitions, (short) config.replicationFactor);
             if (configs.size() > 0) {
