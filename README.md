@@ -28,37 +28,31 @@ where benchmark-parameters and runner-parameters have following format:
 default runner: BasicRunner (org.tussleframework.runners.BasicRunner)
 ```
 
-Kafka E2E Benchmark Parameters:
+##### Kafka E2E Benchmark Parameters:
+* **brokerList** - list of Kafka brokers (default "localhost:9092")
+* **topic** - topic name used for testing (default "test")
+* **topics** - the number of tested topics (default 1)
+* **partitions** - the number of topic partitions for each topic
+* **replicationFactor** - topic replication factor (default 1)
+* **waitAfterDeleteTopic** - seconds, time to do nothing after topic deletion
+* **messageLength** - minimum message size in bytes (default 1024)
+* **messageLengthMax** - maximum message size: if messageLengthMax > messageLength then all message lengths are random between min and max inclusive, otherwise all message lengths are equal to messageLength (default 0)
+* **producers** - number of producer threads (default 1)
+* **consumers** - number of consumer threads (default 1)
+* **pollTimeout** - consumer poll timeout (default 100)
+* **producerAcks** - ProducerConfig.ACKS_DOC (default 1)
+* **batchSize** - ProducerConfig.BATCH_SIZE_CONFIG (default 0)
+* **lingerMs** - ProducerConfig.LINGER_MS_DOC (default 0)
+* **idempotence** - ProducerConfig.ENABLE_IDEMPOTENCE_DOC (default false)
 
-```
-intervalLength - ms, histogram writer interval
-histogramsDir - location for histogram files
-brokerList - list of Kafka brokers
-topic - Kafka topic used for testing
-partitions - Kafka topic partitions number used in the topic creation inside benchmark reset() if BenchmarkConfig.reset is true
-replicationFactor - Kafka topic replication factor used in the topic creation inside benchmark reset() if BenchmarkConfig.reset is true
-waitAfterDeleteTopic - seconds, time to do nothing after topic deletion
-messageLength - minimum size of a message in bytes
-messageLengthMax - maximum size of a message in bytes if > messageLength, else = messageLength
-producers - number of producer threads 
-consumers - number of consumer threads
-pollTimeout - consumer poll timeout 
-producerAcks - ProducerConfig.ACKS_DOC
-batchSize - ProducerConfig.BATCH_SIZE_CONFIG  
-lingerMs - ProducerConfig.LINGER_MS_DOC
-idempotence - ProducerConfig.ENABLE_IDEMPOTENCE_DOC
-
-```
-
-BasicRunner Parameters:
-
-```
-targetRate - op/s, expected target throughput, 0 - unlimited (unthrottled) target rate (default 1k)
-warmupTime - sec, benchmark warmup time (default 0)
-runTime - sec, benchmark run time (default 1m)
-runSteps - number of benchmark run iteration (default 1)
-reset - call reset before each benchmark run (default true)
-```
+##### BasicRunner Parameters:
+* **intervalLength** - ms, histogram writer interval
+* **histogramsDir** - location for histogram files
+* **targetRate** - op/s, expected target throughput, 0 - unlimited (unthrottled) target rate (default 1k)
+* **warmupTime** - sec, benchmark warmup time (default 0)
+* **runTime** - sec, benchmark run time (default 1m)
+* **runSteps** - number of benchmark run iteration (default 1)
+* **reset** - call reset before each benchmark run (default true)
 
 Run examples:
 
@@ -213,12 +207,10 @@ $ echo 1 | sudo tee /sys/kernel/mm/transparent_hugepage/khugepaged/defrag
 ```
 
 ##### Kafka setup:
-Kafka cluster parameters:
 * Kafka broker heap 40G
 * Kafka Zookeeper heap 1G
 
 ##### Benchmark run:
-Kafka benchmark parameters:
 * topics 1 (benchmark's default)
 * partitions 3
 * replicationFactor 3
