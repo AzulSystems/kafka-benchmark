@@ -50,7 +50,7 @@ idempotence - ProducerConfig.ENABLE_IDEMPOTENCE_DOC
 BasicRunner Parameters:
 
 ```
-targetRate - op/s, expected target throughput
+targetRate - op/s, expected target throughput, 0 - unlimited (unthrottled) target rate
 warmupTime - sec, test warmup time
 runTime - sec, test run time
 runSteps - number of benchmark run iteration, default 1
@@ -185,20 +185,20 @@ Output example:
 
 # Example test configuration on AWS
 
-### AWS:
-* AMI: ami-0747bdcabd34c712a (UBUNTU18)
-* 1 node (c5.2xlarge) - for Zookeeper and kafka-e2e-benchmark 
-* 3 nodes (r5d.2xlarge) - for Kafka brokers
+##### Instance setup:
+* AWS image: UBUNTU18 e.g. ami-0747bdcabd34c712a (may be different depending on AWS zone and region) 
+* 1 bode (t2.small): Zookeeper
+* 1 node (m5n.8xlarge): load generator (Kafka E2E benchmark)
+* 3 nodes (i3en.2xlarge): Kafka brokers
 
-### Setup:
-mount SSD drives on r5d.2xlarge instances which are provided with them automatically:
+mount SSD drives on instances for Kafka brokers which are provided with them automatically:
 
 ```
 $ sudo mkdir -p /localhome
 $ sudo mkfs -t ext4 /dev/nvme1n1
 $ sudo mount /dev/nvme1n1 /localhome
 ```
-NOTES: drive name nvme1n1 may be different after instance start, this disk used for Kafka brokers data.
+Drive name nvme1n1 may be different after instance start, this disk used for Kafka brokers data.
 
 Apply recommended THP settings for new kernels:
 
@@ -209,17 +209,29 @@ $ echo defer | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
 $ echo 1 | sudo tee /sys/kernel/mm/transparent_hugepage/khugepaged/defrag
 ```
 
+##### Kafka setup:
 Kafka cluster parameters:
 * Kafka broker heap 40G
 * Kafka Zookeeper heap 1G
 
+##### Benchmark run:
 Kafka benchmark parameters:
-* partitions 3 
+* topics 1 (benchmark's default)
+* partitions 3
 * replicationFactor 3
-* producers 3
+* producers 15
 * consumers 3
-* acks 1
-* messageLength 1000
-* batchSize 0
-* warmupTime 600 s
-* runTime 600 s
+* acks 1 (benchmark's default)
+* messageLength 1024
+* batchSize 0 (benchmark's default)
+* lingerMs 0 (benchmark's default)
+* targetRate 0 (unthrottled)
+* warmupTime 60 sec
+* runTime 600 sec
+
+Benchmark's command line:
+
+```
+$ java -jar kafka-benchmark-*.jar consumers=3 partitions=3 producers=15 rf=3 --runner BasicRunner targetRate=0 warmupTime=1m runTime=10m
+
+```
