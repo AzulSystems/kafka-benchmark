@@ -184,7 +184,7 @@ Output example:
 
 ##### Instance setup:
 * AWS image: UBUNTU18 e.g. ami-0747bdcabd34c712a (may be different depending on AWS zone and region) 
-* 1 bode (t2.small): Zookeeper
+* 1 node (t2.small): Zookeeper
 * 1 node (m5n.8xlarge): load generator (Kafka E2E benchmark)
 * 3 nodes (i3en.2xlarge): Kafka brokers
 
