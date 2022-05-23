@@ -353,9 +353,7 @@ public class KafkaE2EBenchmark implements Benchmark {
             ProducerRunner pr = new ProducerRunner(i, runningCount, timeRecorder, warmupTime, runTime, perProducerMessageRate, topics.get((i - 1) % topics.size()));
             producerThreads.add(new Thread(pr, "Producer_" + (int) targetRate + "_" + i));
         }
-        String ps = withS(config.producers, "producer");
-        String cs = withS(config.consumers, "consumer");
-        log("Starting %s and %s, targetRate %s, warmupTime %ds, runTime %ds", ps, cs, roundFormat(targetRate), warmupTime, runTime);
+        log("Starting %s and %s, targetRate %s, warmupTime %ds, runTime %ds", withS(config.producers, "producer"), withS(config.consumers, "consumer"), roundFormat(targetRate), warmupTime, runTime);
         consumerThreads.forEach(Thread::start);
         producerThreads.forEach(Thread::start);
         SleepTool.sleep(warmupTime * NS_IN_S);

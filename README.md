@@ -9,7 +9,7 @@ The benchmark measures and reports:
 * poll time (p0, p50, p99, p99.9, p99.99, p100, mean)
 * actual rate
 
-Build:
+##### Build:
 
 ```
 $ mvn package # builds target/*jar, needs prebuilt tussle-framework
@@ -19,7 +19,7 @@ $ mvn package # builds target/*jar, needs prebuilt tussle-framework
 $ ./build.sh # builds dependency ../tussle-framework and kafka-benchmark jar
 ```
 
-Run:
+##### Usage:
 
 ```
 $ java -jar kafka-benchmark-*.jar [benchmark-parameters] [--runner runner-class [runner-parameters]]
@@ -54,27 +54,43 @@ default runner: BasicRunner (org.tussleframework.runners.BasicRunner)
 * **runSteps** - number of benchmark run iteration (default 1)
 * **reset** - call reset before each benchmark run (default true)
 
-Run examples:
+##### Run examples:
 
 ```
-$ java -jar kafka-benchmark-*.jar # run with default benchmark parameters
+# run with default benchmark parameters:
+$ java -jar kafka-benchmark-*.jar 
 
+# run with inline parameters:
 $ java -jar kafka-benchmark-*.jar producers=4 consumers=4 partitions=4 --runner BasicRunner targetRate=5k warmupTime=0 runTime=20
 
+# use YAML string for parameters
 $ java -jar kafka-benchmark-*.jar --runner BasicRunner -s "
-targetRate: 10000
-warmupTime: 30
-runTime: 2m
+targetRate: 10k
+warmupTime: 10s
+runTime: 1m
 "
 
-$ java -jar kafka-benchmark-*.jar --runner BasicRunner -f kafka.config 
+# use YAML file
+$ cat run.config
+targetRate: 20k
+warmupTime: 20s
+runTime: 3m
+$ java -jar kafka-benchmark-*.jar --runner BasicRunner -f run.config 
+
+# use two YAML files for benchmark and runner
+$ cat run.config
+targetRate: 20k
+warmupTime: 30s
+runTime: 600s
 $ cat kafka.config
-targetRate: 10k
-warmupTime: 30
-runTime: 120
+producers: 30
+consumers: 10
+partitions: 10
+$ java -jar kafka-benchmark-*.jar -f kafka.config --runner BasicRunner -f run.config
+
 ```
 
-Output example:
+##### Output example:
 
 ```
 2022-04-22 02:14:15,482,NOVT [BasicRunner] =================================================================== 
