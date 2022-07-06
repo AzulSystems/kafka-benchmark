@@ -70,8 +70,8 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
-import org.tussleframework.AbstractConfig;
 import org.tussleframework.Benchmark;
+import org.tussleframework.BenchmarkConfig;
 import org.tussleframework.RunResult;
 import org.tussleframework.TimeRecorder;
 import org.tussleframework.TussleException;
@@ -386,7 +386,7 @@ public class KafkaE2EBenchmark implements Benchmark {
     }
 
     @Override
-    public AbstractConfig getConfig() {
+    public BenchmarkConfig getConfig() {
         return config;
     }
 

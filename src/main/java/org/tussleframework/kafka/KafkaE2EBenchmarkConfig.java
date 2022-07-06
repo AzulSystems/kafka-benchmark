@@ -32,14 +32,14 @@
 
 package org.tussleframework.kafka;
 
-import org.tussleframework.AbstractConfig;
+import org.tussleframework.BenchmarkConfig;
 
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 @Data
 @EqualsAndHashCode(callSuper = false)
-public class KafkaE2EBenchmarkConfig implements AbstractConfig {
+public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public KafkaThrottleMode throttleMode;  // use throttling method for reaching target rate  
     public String brokerList = "localhost:9092"; // list of Kafka brokers
     public String topic = "test";           // Kafka topic used for testing
@@ -63,6 +63,10 @@ public class KafkaE2EBenchmarkConfig implements AbstractConfig {
 
     @Override
     public void validate(boolean runMode) {
+        super.validate(runMode);
+        name = "kafka-e2e-benchmark";
+        rateUnits = "msg/s";
+        timeUnits = "ms";
         if (topics < 1) {
             throw new IllegalArgumentException(String.format("Invalid topics(%d) - should be positive", topics));
         }
