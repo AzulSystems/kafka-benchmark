@@ -32,8 +32,8 @@
 
 package org.tussleframework.kafka;
 
-import static org.tussleframework.tools.FormatTool.NS_IN_MS;
-import static org.tussleframework.tools.FormatTool.NS_IN_S;
+import static org.tussleframework.Globals.*;
+
 import static org.tussleframework.tools.FormatTool.roundFormat;
 import static org.tussleframework.tools.FormatTool.withS;
 
@@ -94,10 +94,6 @@ enum KafkaOp {
 public class KafkaE2EBenchmark implements Benchmark {
 
     static final Logger logger = Logger.getLogger(KafkaE2EBenchmark.class.getName());
-    static final String RATE_MSGS_UNITS = "msg/s";
-    static final String RATE_MB_UNITS = "MiB/s";
-    static final String TIME_MSGS_UNITS = "ms";
-    static final long NANO_TIME_OFFSET = System.currentTimeMillis() * NS_IN_MS - System.nanoTime();
 
     class MsgCounter {
         long errors;
@@ -119,26 +115,26 @@ public class KafkaE2EBenchmark implements Benchmark {
             errors += errs;
         }
 
-        synchronized void accumulate(String name, long startTimeMs, long finishTimeMs, MsgCounter msgCounter) {
+        synchronized void accumulate(String name, long timeMs, MsgCounter msgCounter) {
             msgCount += msgCounter.msgCount;
             msgBytes += msgCounter.msgBytes;
             errors += msgCounter.errors;
-            double timeDiffSec = (finishTimeMs - startTimeMs) / 1000.0;
-            if (totalTime < finishTimeMs - startTimeMs) {
-                totalTime = finishTimeMs - startTimeMs;
+            double timeDiffSec = timeMs / 1000.0;
+            if (totalTime < timeMs) {
+                totalTime = timeMs;
             }
             if (timeDiffSec > 0) {
                 msgThroughput += msgCounter.msgCount / timeDiffSec;
                 bytesThroughput += msgCounter.msgBytes / timeDiffSec;
             }
-            log("%s, %d messages, time %s s", name, msgCounter.msgCount, roundFormat(timeDiffSec));
+            log("%s %d messages, time %s s", name, msgCounter.msgCount, roundFormat(timeDiffSec));
         }
 
         void print(String name) {
-            log("%s msgs rate: %s %s", name, roundFormat(msgThroughput), RATE_MSGS_UNITS);
-            log("%s xfer rate: %s %s", name, roundFormat(bytesThroughput / 1024. / 1024.), RATE_MB_UNITS);
+            log("%s msgs rate: %s %s", name, roundFormat(msgThroughput), config.rateUnits);
+            log("%s xfer rate: %s %s", name, roundFormat(bytesThroughput / 1024.0 / 1024.0), KafkaE2EBenchmarkConfig.RATE_MB_UNITS);
             log("%s msgs count: %d", name, msgCount);
-            log("%s xfer size: %s MiB (%d)", name, roundFormat(msgBytes / 1024. / 1024.), msgBytes);
+            log("%s xfer size: %s MiB (%d)", name, roundFormat(msgBytes / 1024.0 / 1024.0), msgBytes);
             log("%s time: %s ms", name, roundFormat(totalTime));
             log("%s errors: %d", name, errors);
         }
@@ -199,13 +195,9 @@ public class KafkaE2EBenchmark implements Benchmark {
     }
 
     protected void initProps() {
-        consumerProps = new Properties();
-        producerProps = new Properties();
-        setupConsumerProps(consumerProps);
-        setupProducerProps(producerProps);
-        Properties adminClientProps = new Properties();
-        setupAdminClientProps(adminClientProps);
-        adminClient = AdminClient.create(adminClientProps);
+        consumerProps = setupConsumerProps(new Properties());
+        producerProps = setupProducerProps(new Properties());
+        adminClient = AdminClient.create(setupAdminClientProps(new Properties()));
         reset();
     }
 
@@ -252,13 +244,11 @@ public class KafkaE2EBenchmark implements Benchmark {
         } catch (Exception e) {
             if (e instanceof UnknownTopicOrPartitionException) {
                 log("Cannot delete existing topic(s): %s - %s", topicsJoin, e);
-                return;
-            }
-            if (e.getCause() instanceof UnknownTopicOrPartitionException) {
+            } else if (e.getCause() instanceof UnknownTopicOrPartitionException) {
                 log("Cannot delete existing topic(s): %s - %s", topicsJoin, e.getCause());
-                return;
+            } else {
+                throw new KafkaRuntimeException("Failed to delete topic(s): " + topicsJoin, e);
             }
-            throw new KafkaRuntimeException("Failed to delete topic(s): " + topicsJoin, e);
         }
     }
 
@@ -350,16 +340,16 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
         ArrayList<Thread> producerThreads = new ArrayList<>();
         for (int i = 1; i <= config.producers; i++) {
-            ProducerRunner pr = new ProducerRunner(i, runningCount, timeRecorder, warmupTime, runTime, perProducerMessageRate, topics.get((i - 1) % topics.size()));
-            producerThreads.add(new Thread(pr, "Producer_" + (int) targetRate + "_" + i));
+            ProducerRunner producerRunner = new ProducerRunner(i, runningCount, timeRecorder, warmupTime, runTime, perProducerMessageRate, topics.get((i - 1) % topics.size()));
+            producerThreads.add(new Thread(producerRunner, "Producer_" + (int) targetRate + "_" + i));
         }
-        log("Starting %s and %s, targetRate %s, warmupTime %ds, runTime %ds", withS(config.producers, "producer"), withS(config.consumers, "consumer"), roundFormat(targetRate), warmupTime, runTime);
+        log("Starting %s and %s, targetRate %s, warmupTime %d s, runTime %d s", withS(config.producers, "producer"), withS(config.consumers, "consumer"), roundFormat(targetRate), warmupTime, runTime);
         consumerThreads.forEach(Thread::start);
         producerThreads.forEach(Thread::start);
         SleepTool.sleep(warmupTime * NS_IN_S);
         if (timeRecorder != null) {
             for (KafkaOp op : KafkaOp.values()) {
-                timeRecorder.startRecording(op.value, RATE_MSGS_UNITS, TIME_MSGS_UNITS);
+                timeRecorder.startRecording(op.value, config.rateUnits, config.timeUnits);
             }
         }
         SleepTool.sleep(runTime * NS_IN_S);
@@ -369,7 +359,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
         running = false;
         consumerThreads.forEach(KafkaE2EBenchmark::join);
-        log("Requested MR: %s %s", roundFormat(targetRate), RATE_MSGS_UNITS);
+        log("Requested MR: %s %s", roundFormat(targetRate), config.rateUnits);
         if (producerWarmupCounter.getCount() > 0) {
             producerWarmupCounter.print("Producer (warmup)");
             consumerWarmupCounter.print("Consumer (warmup)");
@@ -377,7 +367,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         producerCounter.print("Producer");
         consumerCounter.print("Consumer");
         return RunResult.builder()
-                .rateUnits(RATE_MSGS_UNITS)
+                .rateUnits(config.rateUnits)
                 .time(producerCounter.totalTime)
                 .rate(producerCounter.msgThroughput)
                 .count(consumerCounter.msgCount)
@@ -390,12 +380,13 @@ public class KafkaE2EBenchmark implements Benchmark {
         return config;
     }
 
-    private void setupAdminClientProps(Properties props) {
+    private Properties setupAdminClientProps(Properties props) {
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList);
         props.put(AdminClientConfig.CLIENT_ID_CONFIG, "test-" + System.currentTimeMillis());
+        return props;
     }
 
-    private void setupConsumerProps(Properties props) {
+    private Properties setupConsumerProps(Properties props) {
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group-" + System.currentTimeMillis());
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
@@ -405,9 +396,10 @@ public class KafkaE2EBenchmark implements Benchmark {
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
         props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "0"); // ensure no temporal batching
+        return props;
     }
 
-    private void setupProducerProps(Properties props) {
+    private Properties setupProducerProps(Properties props) {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList);
         props.put(ProducerConfig.LINGER_MS_CONFIG, "0"); // ensure writes are synchronous
         props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, Long.MAX_VALUE);
@@ -425,6 +417,7 @@ public class KafkaE2EBenchmark implements Benchmark {
             props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, config.requestTimeoutMs);
         }
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, config.idempotence);
+        return props;
     }
 
     class ProducerRunner implements Runnable {
@@ -442,6 +435,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         private int producerId;
         private int runTime;
         private long warmupPrintTime;
+        private long warmupPrintTimeCnt;
         private char[] spaceChars;
 
         ProducerRunner(int producerId, AtomicInteger runningProducers, TimeRecorder timeRecorder, int warmupTime, int runTime, double messageRate, String topic) {
@@ -473,7 +467,8 @@ public class KafkaE2EBenchmark implements Benchmark {
         private void send(KafkaProducer<byte[], byte[]> producer, boolean isWarmup, long intendedNextStartTime) {
             long recordSendStartTime = System.nanoTime() + NANO_TIME_OFFSET;
             if (isWarmup && warmupPrintTime < recordSendStartTime && producerId == 1) {
-                log("warmup...");
+                warmupPrintTimeCnt++;
+                log("warmup %d...", warmupPrintTimeCnt);
                 warmupPrintTime = recordSendStartTime + NS_IN_S * 5;
             }
             producer.send(getNextRecord(recordSendStartTime, intendedNextStartTime), (RecordMetadata metadata, Exception e) -> {
@@ -551,8 +546,8 @@ public class KafkaE2EBenchmark implements Benchmark {
             }
             producer.flush();
             producer.close();
-            producerWarmupCounter.accumulate(Thread.currentThread().getName() + " (warmup)", startWarmupTimeMs, startPostWarmupTimeMs, warmupMsgCounter);
-            producerCounter.accumulate(Thread.currentThread().getName(), startPostWarmupTimeMs, finishTimeMs, msgCounter);
+            producerWarmupCounter.accumulate(Thread.currentThread().getName() + " (warmup)", startPostWarmupTimeMs - startWarmupTimeMs, warmupMsgCounter);
+            producerCounter.accumulate(Thread.currentThread().getName() + "         ", finishTimeMs - startPostWarmupTimeMs, msgCounter);
             runningProducers.decrementAndGet();
         }
     }
@@ -607,8 +602,8 @@ public class KafkaE2EBenchmark implements Benchmark {
             }
             consumer.close();
             long finishTimeMs = System.currentTimeMillis();
-            consumerWarmupCounter.accumulate(Thread.currentThread().getName() + " (warmup)", startWarmupTimeMs, startPostWarmupTimeMs, warmupMsgCounter);
-            consumerCounter.accumulate(Thread.currentThread().getName(), startPostWarmupTimeMs, finishTimeMs, msgCounter);
+            consumerWarmupCounter.accumulate(Thread.currentThread().getName() + " (warmup)", startPostWarmupTimeMs - startWarmupTimeMs, warmupMsgCounter);
+            consumerCounter.accumulate(Thread.currentThread().getName() + "         ", finishTimeMs - startPostWarmupTimeMs, msgCounter);
             runningConsumers.decrementAndGet();
         }
     }

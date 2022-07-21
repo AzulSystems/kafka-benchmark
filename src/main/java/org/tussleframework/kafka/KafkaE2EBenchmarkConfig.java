@@ -40,6 +40,11 @@ import lombok.EqualsAndHashCode;
 @Data
 @EqualsAndHashCode(callSuper = false)
 public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
+
+    public static final String RATE_MSGS_UNITS = "msg/s";
+    public static final String RATE_MB_UNITS = "MiB/s";
+    public static final String TIME_MSGS_UNITS = "ms";
+
     public KafkaThrottleMode throttleMode;  // use throttling method for reaching target rate  
     public String brokerList = "localhost:9092"; // list of Kafka brokers
     public String topic = "test";           // Kafka topic used for testing
@@ -65,8 +70,8 @@ public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public void validate(boolean runMode) {
         super.validate(runMode);
         name = "kafka-e2e-benchmark";
-        rateUnits = "msg/s";
-        timeUnits = "ms";
+        rateUnits = RATE_MSGS_UNITS;
+        timeUnits = TIME_MSGS_UNITS;
         if (topics < 1) {
             throw new IllegalArgumentException(String.format("Invalid topics(%d) - should be positive", topics));
         }
