@@ -243,7 +243,7 @@ $ echo 1 | sudo tee /sys/kernel/mm/transparent_hugepage/khugepaged/defrag
 Benchmark's command line:
 
 ```
-$ java -jar kafka-benchmark-*.jar consumers=3 partitions=3 producers=15 rf=3 \
+$ java -jar kafka-benchmark-*.jar consumers=3 partitions=3 producers=15 replicationFactor =3 \
 --runner BasicRunner targetRate=0 warmupTime=1m runTime=10m
 
 ```
