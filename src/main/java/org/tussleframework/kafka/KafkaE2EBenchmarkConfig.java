@@ -49,6 +49,8 @@ public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public String brokerList = "localhost:9092"; // list of Kafka brokers
     public String topic = "test";           // Kafka topic used for testing
     public String acks = "1";               // ProducerConfig.ACKS_DOC
+    public String compression;              // ProducerConfig.COMPRESSION_TYPE_CONFIG
+    public String topicCompression;         // TopicConfig.COMPRESSION_TYPE_CONFIG
     public boolean idempotence = false;     // ProducerConfig.ENABLE_IDEMPOTENCE_DOC
     public boolean probeTopics = false;     // perform message probe
     public int topics = 1;                  // Kafka topic number
@@ -62,8 +64,8 @@ public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public int pollTimeoutMs = 100;         // consumer poll timeout 
     public int batchSize = -1;              // ProducerConfig.BATCH_SIZE_DOC
     public int lingerMs = -1;               // ProducerConfig.LINGER_MS_DOC
-    public int retentionMs = -1;            // ProducerConfig.RETENTION_MS_DOC
-    public int retentionBytes = -1;         // ProducerConfig.RETENTION_BYTES_DOC
+    public int retentionMs = -1;            // TopicConfig.RETENTION_MS_DOC
+    public int retentionBytes = -1;         // TopicConfig.RETENTION_BYTES_DOC
     public int requestTimeoutMs = -1;       // ProducerConfig.REQUEST_TIMEOUT_MS_DOC
 
     @Override

@@ -260,6 +260,9 @@ public class KafkaE2EBenchmark implements Benchmark {
         if (config.retentionBytes > 0) {
             configs.put(TopicConfig.RETENTION_BYTES_CONFIG, String.valueOf(config.retentionBytes));
         }
+        if (config.topicCompression != null && !config.topicCompression.isEmpty()) {
+            configs.put(TopicConfig.COMPRESSION_TYPE_CONFIG, config.topicCompression);
+        }
         ArrayList<NewTopic> newTopics = new ArrayList<>();
         Collection<String> topics = getTopics();
         String topicsJoin = FormatTool.join(",", topics);
@@ -369,7 +372,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         return RunResult.builder()
                 .rateUnits(config.rateUnits)
                 .time(producerCounter.totalTime)
-                .rate(producerCounter.msgThroughput)
+                .actualRate(producerCounter.msgThroughput)
                 .count(consumerCounter.msgCount)
                 .errors(producerCounter.errors)
                 .build();
@@ -417,6 +420,9 @@ public class KafkaE2EBenchmark implements Benchmark {
             props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, config.requestTimeoutMs);
         }
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, config.idempotence);
+        if (config.compression != null && !config.compression.isEmpty()) {
+            props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, config.compression);
+        }
         return props;
     }
 
