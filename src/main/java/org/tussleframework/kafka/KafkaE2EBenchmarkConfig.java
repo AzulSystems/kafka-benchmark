@@ -83,11 +83,14 @@ public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
         if (replicationFactor < 1) {
             throw new IllegalArgumentException(String.format("Invalid replicationFactor(%d) - should be positive", replicationFactor));
         }
-        if (producers < 1) {
-            throw new IllegalArgumentException(String.format("Invalid producers(%d) - should be positive", producers));
+        if (producers < 0) {
+            throw new IllegalArgumentException(String.format("Invalid producers(%d) - should be non-negative", producers));
         }
-        if (consumers < 1) {
-            throw new IllegalArgumentException(String.format("Invalid consumers(%d) - should be positive", consumers));
+        if (consumers < 0) {
+            throw new IllegalArgumentException(String.format("Invalid consumers(%d) - should be non-negative", consumers));
+        }
+        if (producers + consumers < 1) {
+            throw new IllegalArgumentException(String.format("Invalid total number of producers(%d) and consumers(%d) - should be positive", producers, consumers));
         }
     }
 }
