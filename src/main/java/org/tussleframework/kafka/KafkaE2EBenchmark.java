@@ -243,9 +243,9 @@ public class KafkaE2EBenchmark implements Benchmark {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             if (e instanceof UnknownTopicOrPartitionException) {
-                log("Cannot delete existing topic(s): %s - %s", topicsJoin, e);
+                log("Cannot delete topic(s): %s - %s", topicsJoin, e);
             } else if (e.getCause() instanceof UnknownTopicOrPartitionException) {
-                log("Cannot delete existing topic(s): %s - %s", topicsJoin, e.getCause());
+                log("Cannot delete topic(s): %s - %s", topicsJoin, e.getCause());
             } else {
                 throw new KafkaRuntimeException("Failed to delete topic(s): " + topicsJoin, e);
             }
