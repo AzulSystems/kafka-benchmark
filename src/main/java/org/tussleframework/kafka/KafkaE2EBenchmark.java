@@ -263,6 +263,9 @@ public class KafkaE2EBenchmark implements Benchmark {
         if (config.topicCompression != null && !config.topicCompression.isEmpty()) {
             configs.put(TopicConfig.COMPRESSION_TYPE_CONFIG, config.topicCompression);
         }
+        if (config.minInsyncReplicas > 0) {
+            configs.put(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(config.minInsyncReplicas));
+        }
         ArrayList<NewTopic> newTopics = new ArrayList<>();
         Collection<String> topics = getTopics();
         String topicsJoin = FormatTool.join(",", topics);
@@ -410,6 +413,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         props.put(ProducerConfig.RETRIES_CONFIG, "0");
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, config.idempotence);
         if (config.batchSize != -1) {
             props.put(ProducerConfig.BATCH_SIZE_CONFIG, config.batchSize);
         }
@@ -419,7 +423,6 @@ public class KafkaE2EBenchmark implements Benchmark {
         if (config.requestTimeoutMs != -1) {
             props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, config.requestTimeoutMs);
         }
-        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, config.idempotence);
         if (config.compression != null && !config.compression.isEmpty()) {
             props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, config.compression);
         }
