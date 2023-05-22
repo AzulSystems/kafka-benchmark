@@ -35,9 +35,9 @@ package org.tussleframework.kafka;
 import org.tussleframework.Run;
 import org.tussleframework.tools.LoggerTool;
 
-public class KafkaE2EBenchmarkRunner {
+public class KafkaBenchmarkRunner {
     public static void main(String[] args) {
         LoggerTool.init("benchmark");
-        Run.run(new KafkaE2EBenchmark(), args);
+        Run.run(new KafkaBenchmark(), args);
     }
 }

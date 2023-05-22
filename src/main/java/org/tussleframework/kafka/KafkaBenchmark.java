@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Azul Systems
+ * Copyright (c) 2021-2023, Azul Systems
  * 
  * All rights reserved.
  * 
@@ -91,17 +91,17 @@ enum KafkaOp {
     }
 }
 
-public class KafkaE2EBenchmark implements Benchmark {
+public class KafkaBenchmark implements Benchmark {
 
-    static final Logger logger = Logger.getLogger(KafkaE2EBenchmark.class.getName());
+    static final Logger logger = Logger.getLogger(KafkaBenchmark.class.getName());
 
     class MsgCounter {
         long errors;
+        long msgBytes;
         long msgCount;
         long totalTime;
-        long msgBytes;
-        double bytesThroughput;
         double msgThroughput;
+        double bytesThroughput;
 
         synchronized long getCount() {
             return msgCount;
@@ -132,7 +132,7 @@ public class KafkaE2EBenchmark implements Benchmark {
 
         void print(String name) {
             log("%s msgs rate: %s %s", name, roundFormat(msgThroughput), config.rateUnits);
-            log("%s xfer rate: %s %s", name, roundFormat(bytesThroughput / 1024.0 / 1024.0), KafkaE2EBenchmarkConfig.RATE_MB_UNITS);
+            log("%s xfer rate: %s %s", name, roundFormat(bytesThroughput / 1024.0 / 1024.0), KafkaBenchmarkConfig.RATE_MB_UNITS);
             log("%s msgs count: %d", name, msgCount);
             log("%s xfer size: %s MiB (%d)", name, roundFormat(msgBytes / 1024.0 / 1024.0), msgBytes);
             log("%s time: %s ms", name, roundFormat(totalTime));
@@ -140,7 +140,7 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
     }
 
-    private KafkaE2EBenchmarkConfig config;
+    private KafkaBenchmarkConfig config;
     private MsgCounter consumerWarmupCounter;
     private MsgCounter producerWarmupCounter;
     private MsgCounter consumerCounter;
@@ -157,21 +157,21 @@ public class KafkaE2EBenchmark implements Benchmark {
         }
     }
 
-    public KafkaE2EBenchmark() {
+    public KafkaBenchmark() {
     }
 
-    public KafkaE2EBenchmark(String[] args) throws TussleException {
+    public KafkaBenchmark(String[] args) throws TussleException {
         init(args);
     }
 
-    public KafkaE2EBenchmark(KafkaE2EBenchmarkConfig config) {
+    public KafkaBenchmark(KafkaBenchmarkConfig config) {
         this.config = config;
         initProps();
     }
 
     @Override
     public void init(String[] args) throws TussleException {
-        config = ConfigLoader.loadConfig(args, true, KafkaE2EBenchmarkConfig.class);
+        config = ConfigLoader.loadConfig(args, true, KafkaBenchmarkConfig.class);
         initProps();
     }
 
@@ -260,11 +260,11 @@ public class KafkaE2EBenchmark implements Benchmark {
         if (config.retentionBytes > 0) {
             configs.put(TopicConfig.RETENTION_BYTES_CONFIG, String.valueOf(config.retentionBytes));
         }
-        if (config.topicCompression != null && !config.topicCompression.isEmpty()) {
-            configs.put(TopicConfig.COMPRESSION_TYPE_CONFIG, config.topicCompression);
-        }
         if (config.minInsyncReplicas > 0) {
             configs.put(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(config.minInsyncReplicas));
+        }
+        if (config.topicProps != null) {
+            config.topicProps.forEach(configs::put);
         }
         ArrayList<NewTopic> newTopics = new ArrayList<>();
         Collection<String> topics = getTopics();
@@ -359,12 +359,12 @@ public class KafkaE2EBenchmark implements Benchmark {
             }
         }
         SleepTool.sleep(runTime * NS_IN_S);
-        producerThreads.forEach(KafkaE2EBenchmark::join);
+        producerThreads.forEach(KafkaBenchmark::join);
         if (timeRecorder != null) {
             timeRecorder.stopRecording();
         }
         running = false;
-        consumerThreads.forEach(KafkaE2EBenchmark::join);
+        consumerThreads.forEach(KafkaBenchmark::join);
         log("Requested MR: %s %s", roundFormat(targetRate), config.rateUnits);
         if (producerWarmupCounter.getCount() > 0) {
             producerWarmupCounter.print("Producer (warmup)");
@@ -393,39 +393,40 @@ public class KafkaE2EBenchmark implements Benchmark {
     }
 
     private Properties setupConsumerProps(Properties props) {
+        // pass via producerProps
+        //props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
+        //props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        //props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "0"); // ensure no temporal batching
+        if (config.consumerProps != null) {
+            config.consumerProps.forEach(props::put);
+        }
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group-" + System.currentTimeMillis());
-        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-        props.put(ConsumerConfig.RECEIVE_BUFFER_CONFIG, "16777216");
-        props.put(ConsumerConfig.SEND_BUFFER_CONFIG, "16777216");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
-        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "0"); // ensure no temporal batching
         return props;
     }
 
     private Properties setupProducerProps(Properties props) {
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList);
-        props.put(ProducerConfig.LINGER_MS_CONFIG, "0"); // ensure writes are synchronous
-        props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, Long.MAX_VALUE);
-        props.put(ProducerConfig.ACKS_CONFIG, config.acks);
-        props.put(ProducerConfig.RETRIES_CONFIG, "0");
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
-        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, config.idempotence);
+        if (config.producerProps != null) {
+            config.producerProps.forEach(props::put);
+        }
+        // pass via producerProps
+        //props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, Long.MAX_VALUE);
+        //props.put(ProducerConfig.RETRIES_CONFIG, "0");
+        //props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, config.idempotence);
+        if (config.acks != null && !config.acks.isEmpty()) {
+            props.put(ProducerConfig.ACKS_CONFIG, config.acks);
+        }
         if (config.batchSize != -1) {
             props.put(ProducerConfig.BATCH_SIZE_CONFIG, config.batchSize);
         }
         if (config.lingerMs != -1) {
             props.put(ProducerConfig.LINGER_MS_CONFIG, config.lingerMs);
         }
-        if (config.requestTimeoutMs != -1) {
-            props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, config.requestTimeoutMs);
-        }
-        if (config.compression != null && !config.compression.isEmpty()) {
-            props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, config.compression);
-        }
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList);
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer");
         return props;
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Azul Systems
+ * Copyright (c) 2021-2023, Azul Systems
  * 
  * All rights reserved.
  * 
@@ -32,6 +32,8 @@
 
 package org.tussleframework.kafka;
 
+import java.util.Map;
+
 import org.tussleframework.BenchmarkConfig;
 
 import lombok.Data;
@@ -39,7 +41,7 @@ import lombok.EqualsAndHashCode;
 
 @Data
 @EqualsAndHashCode(callSuper = false)
-public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
+public class KafkaBenchmarkConfig extends BenchmarkConfig {
 
     public static final String RATE_MSGS_UNITS = "msg/s";
     public static final String RATE_MB_UNITS = "MiB/s";
@@ -55,10 +57,10 @@ public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public int consumers = 1;               // number of consumers
 
     // ConsumerConfig
-    public int pollTimeoutMs = 100;         // consumer poll timeout 
+    public int pollTimeoutMs = 100;         // consumer poll timeout
+    public Map<String, String> consumerProps;
 
     // TopicConfig
-    public String topicCompression;         // TopicConfig.COMPRESSION_TYPE_CONFIG
     public int topics = 1;                  // Kafka topic number
     public int partitions = 1;              // Kafka topic partitions number 
     public int replicationFactor = 1;       // Kafka topic replication factor
@@ -66,14 +68,13 @@ public class KafkaE2EBenchmarkConfig extends BenchmarkConfig {
     public int retentionMs = -1;            // TopicConfig.RETENTION_MS_DOC
     public int retentionBytes = -1;         // TopicConfig.RETENTION_BYTES_DOC
     public int minInsyncReplicas = -1;      // TopicConfig.MIN_IN_SYNC_REPLICAS_DOC
+    public Map<String, String> topicProps;  // all other topic properties
 
     // ProducerConfig
     public String acks = "1";               // ProducerConfig.ACKS_DOC
-    public String compression;              // ProducerConfig.COMPRESSION_TYPE_CONFIG
-    public boolean idempotence = false;     // ProducerConfig.ENABLE_IDEMPOTENCE_DOC
     public int batchSize = -1;              // ProducerConfig.BATCH_SIZE_DOC
     public int lingerMs = -1;               // ProducerConfig.LINGER_MS_DOC
-    public int requestTimeoutMs = -1;       // ProducerConfig.REQUEST_TIMEOUT_MS_DOC
+    public Map<String, String> producerProps;
 
     @Override
     public void validate(boolean runMode) {

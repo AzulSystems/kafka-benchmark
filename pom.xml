@@ -21,7 +21,7 @@
     <properties>
         <java.version>1.8</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <start-class>org.tussleframework.kafka.KafkaE2EBenchmarkRunner</start-class>
+        <start-class>org.tussleframework.kafka.KafkaBenchmarkRunner</start-class>
     </properties>
     <dependencies>
         <dependency>

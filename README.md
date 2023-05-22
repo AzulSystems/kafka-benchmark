@@ -24,12 +24,14 @@ $ ./build.sh # builds dependency ../tussle-framework and kafka-benchmark jar
 ```
 $ java -jar kafka-benchmark-*.jar [benchmark-parameters] [--runner runner-class [runner-parameters]]
 where benchmark-parameters and runner-parameters have following format:
-[-f yaml-file | -s yaml-string | -p prop1=value1 -p prop2=value2 ...]
+[-f yaml-file | -s yaml-string | -p prop1=value1 -p prop2=value2 ... | prop1=value1 prop2=value2 ... ]
 default runner: BasicRunner (org.tussleframework.runners.BasicRunner)
 ```
 
 ##### Kafka E2E Benchmark Parameters:
 * **brokerList** - list of Kafka brokers (default "localhost:9092")
+* **producers** - number of producers (default 1)
+* **consumers** - number of consumers (default 1)
 * **topic** - topic name used for testing (default "test")
 * **topics** - the number of tested topics (default 1)
 * **partitions** - the number of topic partitions for each topic
@@ -37,13 +39,15 @@ default runner: BasicRunner (org.tussleframework.runners.BasicRunner)
 * **waitAfterDeleteTopic** - seconds, time to do nothing after topic deletion
 * **messageLength** - minimum message size in bytes (default 1024)
 * **messageLengthMax** - maximum message size: if messageLengthMax > messageLength then all message lengths are random between min and max inclusive, otherwise all message lengths are equal to messageLength (default 0)
-* **producers** - number of producer threads (default 1)
-* **consumers** - number of consumer threads (default 1)
+* **topicProps** - other topic properties [key=value,...]
+
 * **pollTimeout** - consumer poll timeout (default 100)
-* **producerAcks** - ProducerConfig.ACKS_DOC (default 1)
+* **consumerProps** - other consumer properties [key=value,...]
+
+* **acks** - ProducerConfig.ACKS_DOC (default 1)
 * **batchSize** - ProducerConfig.BATCH_SIZE_CONFIG (default 0)
 * **lingerMs** - ProducerConfig.LINGER_MS_DOC (default 0)
-* **idempotence** - ProducerConfig.ENABLE_IDEMPOTENCE_DOC (default false)
+* **producerProps** - other producer properties [key=value,...]
 
 ##### BasicRunner Parameters:
 * **intervalLength** - ms, histogram writer interval
@@ -97,12 +101,12 @@ $ java -jar kafka-benchmark-*.jar -f kafka.config --runner BasicRunner -f run.co
 2022-04-22 02:14:15,483,NOVT [BasicRunner] Benchmark: kafka-e2e-benchmark (step 1) 
 2022-04-22 02:14:15,488,NOVT [BasicRunner] Benchmark reset... 
 2022-04-22 02:14:15,490,NOVT [BasicRunner] Benchmark run at target rate 10000 op/s (100%), warmup 30 s, run time 120 s... 
-2022-04-22 02:14:15,492,NOVT [KafkaE2EBenchmark] Starting 1 producer and 1 consumer, targetRate 10000, warmupTime 30s, runTime 120s 
-2022-04-22 02:14:15,494,NOVT [KafkaE2EBenchmark] Consumer_10000_1 started on topic 'test_1' 
-2022-04-22 02:14:15,494,NOVT [KafkaE2EBenchmark] Producer_10000_1 started on topic 'test_1' 
-2022-04-22 02:14:15,524,NOVT [KafkaE2EBenchmark] warmup... 
-2022-04-22 02:14:20,524,NOVT [KafkaE2EBenchmark] warmup... 
-2022-04-22 02:14:40,525,NOVT [KafkaE2EBenchmark] warmup... 
+2022-04-22 02:14:15,492,NOVT [KafkaBenchmark] Starting 1 producer and 1 consumer, targetRate 10000, warmupTime 30s, runTime 120s 
+2022-04-22 02:14:15,494,NOVT [KafkaBenchmark] Consumer_10000_1 started on topic 'test_1' 
+2022-04-22 02:14:15,494,NOVT [KafkaBenchmark] Producer_10000_1 started on topic 'test_1' 
+2022-04-22 02:14:15,524,NOVT [KafkaBenchmark] warmup... 
+2022-04-22 02:14:20,524,NOVT [KafkaBenchmark] warmup... 
+2022-04-22 02:14:40,525,NOVT [KafkaBenchmark] warmup... 
 2022-04-22 02:14:50,503,NOVT [HdrLogWriterTask] --------------------------------------------------------------------------------------------------------------- 
 2022-04-22 02:14:50,503,NOVT [HdrLogWriterTask]           name |   time |  progr |    p50ms |    p90ms |    p99ms |   p100ms |     mean |    count |    total 
 2022-04-22 02:14:50,503,NOVT [HdrLogWriterTask] --------------------------------------------------------------------------------------------------------------- 
@@ -117,35 +121,35 @@ $ java -jar kafka-benchmark-*.jar -f kafka.config --runner BasicRunner -f run.co
 2022-04-22 02:14:55,510,NOVT [HdrLogWriterTask] end-to-en serv |     10 |   8.3% |   0.1965 |   0.4605 |    2.685 |    7.074 |   0.3121 |    49854 |    99629 
 2022-04-22 02:14:55,512,NOVT [HdrLogWriterTask]      send serv |     10 |   8.3% |   0.0951 |   0.2652 |    2.095 |    6.443 |   0.1876 |    49838 |    99871 
 ...
-2022-04-22 02:16:45,529,NOVT [KafkaE2EBenchmark] Producer_10000_1 (warmup), 299993 messages, time 30 s 
-2022-04-22 02:16:45,529,NOVT [KafkaE2EBenchmark] Producer_10000_1, 1200000 messages, time 120 s 
-2022-04-22 02:16:45,629,NOVT [KafkaE2EBenchmark] Consumer_10000_1 (warmup), 299781 messages, time 30 s 
-2022-04-22 02:16:45,629,NOVT [KafkaE2EBenchmark] Consumer_10000_1, 1199792 messages, time 120.1 s 
-2022-04-22 02:16:45,630,NOVT [KafkaE2EBenchmark] Requested MR: 10000 msg/s 
-2022-04-22 02:16:45,631,NOVT [KafkaE2EBenchmark] Producer (warmup) msgs rate: 10000 msg/s 
-2022-04-22 02:16:45,631,NOVT [KafkaE2EBenchmark] Producer (warmup) xfer rate: 9.765 MiB/s 
-2022-04-22 02:16:45,632,NOVT [KafkaE2EBenchmark] Producer (warmup) msgs count: 299993 
-2022-04-22 02:16:45,632,NOVT [KafkaE2EBenchmark] Producer (warmup) xfer size: 293 MiB (307192832) 
-2022-04-22 02:16:45,633,NOVT [KafkaE2EBenchmark] Producer (warmup) time: 30000 ms 
-2022-04-22 02:16:45,633,NOVT [KafkaE2EBenchmark] Producer (warmup) errors: 0 
-2022-04-22 02:16:45,633,NOVT [KafkaE2EBenchmark] Consumer (warmup) msgs rate: 9993 msg/s 
-2022-04-22 02:16:45,633,NOVT [KafkaE2EBenchmark] Consumer (warmup) xfer rate: 9.758 MiB/s 
-2022-04-22 02:16:45,633,NOVT [KafkaE2EBenchmark] Consumer (warmup) msgs count: 299781 
-2022-04-22 02:16:45,634,NOVT [KafkaE2EBenchmark] Consumer (warmup) xfer size: 293 MiB (306975744) 
-2022-04-22 02:16:45,634,NOVT [KafkaE2EBenchmark] Consumer (warmup) time: 30000 ms 
-2022-04-22 02:16:45,634,NOVT [KafkaE2EBenchmark] Consumer (warmup) errors: 0 
-2022-04-22 02:16:45,634,NOVT [KafkaE2EBenchmark] Producer msgs rate: 10000 msg/s 
-2022-04-22 02:16:45,634,NOVT [KafkaE2EBenchmark] Producer xfer rate: 9.766 MiB/s 
-2022-04-22 02:16:45,634,NOVT [KafkaE2EBenchmark] Producer msgs count: 1200000 
-2022-04-22 02:16:45,634,NOVT [KafkaE2EBenchmark] Producer xfer size: 1172 MiB (1228800000) 
-2022-04-22 02:16:45,635,NOVT [KafkaE2EBenchmark] Producer time: 120000 ms 
-2022-04-22 02:16:45,635,NOVT [KafkaE2EBenchmark] Producer errors: 0 
-2022-04-22 02:16:45,635,NOVT [KafkaE2EBenchmark] Consumer msgs rate: 9991 msg/s 
-2022-04-22 02:16:45,635,NOVT [KafkaE2EBenchmark] Consumer xfer rate: 9.757 MiB/s 
-2022-04-22 02:16:45,635,NOVT [KafkaE2EBenchmark] Consumer msgs count: 1199792 
-2022-04-22 02:16:45,635,NOVT [KafkaE2EBenchmark] Consumer xfer size: 1172 MiB (1228587008) 
-2022-04-22 02:16:45,635,NOVT [KafkaE2EBenchmark] Consumer time: 120084 ms 
-2022-04-22 02:16:45,635,NOVT [KafkaE2EBenchmark] Consumer errors: 0 
+2022-04-22 02:16:45,529,NOVT [KafkaBenchmark] Producer_10000_1 (warmup), 299993 messages, time 30 s 
+2022-04-22 02:16:45,529,NOVT [KafkaBenchmark] Producer_10000_1, 1200000 messages, time 120 s 
+2022-04-22 02:16:45,629,NOVT [KafkaBenchmark] Consumer_10000_1 (warmup), 299781 messages, time 30 s 
+2022-04-22 02:16:45,629,NOVT [KafkaBenchmark] Consumer_10000_1, 1199792 messages, time 120.1 s 
+2022-04-22 02:16:45,630,NOVT [KafkaBenchmark] Requested MR: 10000 msg/s 
+2022-04-22 02:16:45,631,NOVT [KafkaBenchmark] Producer (warmup) msgs rate: 10000 msg/s 
+2022-04-22 02:16:45,631,NOVT [KafkaBenchmark] Producer (warmup) xfer rate: 9.765 MiB/s 
+2022-04-22 02:16:45,632,NOVT [KafkaBenchmark] Producer (warmup) msgs count: 299993 
+2022-04-22 02:16:45,632,NOVT [KafkaBenchmark] Producer (warmup) xfer size: 293 MiB (307192832) 
+2022-04-22 02:16:45,633,NOVT [KafkaBenchmark] Producer (warmup) time: 30000 ms 
+2022-04-22 02:16:45,633,NOVT [KafkaBenchmark] Producer (warmup) errors: 0 
+2022-04-22 02:16:45,633,NOVT [KafkaBenchmark] Consumer (warmup) msgs rate: 9993 msg/s 
+2022-04-22 02:16:45,633,NOVT [KafkaBenchmark] Consumer (warmup) xfer rate: 9.758 MiB/s 
+2022-04-22 02:16:45,633,NOVT [KafkaBenchmark] Consumer (warmup) msgs count: 299781 
+2022-04-22 02:16:45,634,NOVT [KafkaBenchmark] Consumer (warmup) xfer size: 293 MiB (306975744) 
+2022-04-22 02:16:45,634,NOVT [KafkaBenchmark] Consumer (warmup) time: 30000 ms 
+2022-04-22 02:16:45,634,NOVT [KafkaBenchmark] Consumer (warmup) errors: 0 
+2022-04-22 02:16:45,634,NOVT [KafkaBenchmark] Producer msgs rate: 10000 msg/s 
+2022-04-22 02:16:45,634,NOVT [KafkaBenchmark] Producer xfer rate: 9.766 MiB/s 
+2022-04-22 02:16:45,634,NOVT [KafkaBenchmark] Producer msgs count: 1200000 
+2022-04-22 02:16:45,634,NOVT [KafkaBenchmark] Producer xfer size: 1172 MiB (1228800000) 
+2022-04-22 02:16:45,635,NOVT [KafkaBenchmark] Producer time: 120000 ms 
+2022-04-22 02:16:45,635,NOVT [KafkaBenchmark] Producer errors: 0 
+2022-04-22 02:16:45,635,NOVT [KafkaBenchmark] Consumer msgs rate: 9991 msg/s 
+2022-04-22 02:16:45,635,NOVT [KafkaBenchmark] Consumer xfer rate: 9.757 MiB/s 
+2022-04-22 02:16:45,635,NOVT [KafkaBenchmark] Consumer msgs count: 1199792 
+2022-04-22 02:16:45,635,NOVT [KafkaBenchmark] Consumer xfer size: 1172 MiB (1228587008) 
+2022-04-22 02:16:45,635,NOVT [KafkaBenchmark] Consumer time: 120084 ms 
+2022-04-22 02:16:45,635,NOVT [KafkaBenchmark] Consumer errors: 0 
 2022-04-22 02:16:45,636,NOVT [BasicRunner] Reguested rate 10000 msg/s (100%), actual rate 10000 msg/s 
 2022-04-22 02:16:45,636,NOVT [BasicRunner] ----------------------------------------------------- 
 2022-04-22 02:16:45,637,NOVT [BasicRunner] Run finished: kafka-e2e-benchmark 
